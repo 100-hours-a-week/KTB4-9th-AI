@@ -1,6 +1,6 @@
 # 🎯 이슈 번호
 
-close {#이슈 번호 기입}
+Fixes 100-hours-a-week/KTB4-9th-AI{#이슈 번호 기입}
 
 ## ✅ 체크 리스트
 
