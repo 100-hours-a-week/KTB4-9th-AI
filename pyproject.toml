@@ -1,0 +1,44 @@
+[project]
+name = "ktb4-9th-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "alembic>=1.20.0",
+    "fastapi[standard]>=0.141.1",
+    "httpx>=0.28.1",
+    "langchain-core>=1.6.3",
+    "langchain-google-genai>=4.4.0",
+    "langgraph>=1.2.11",
+    "pgvector>=0.5.0",
+    "psycopg[binary]>=3.3.5",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2.0.54",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.8",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+indent-width = 4
+ 
+# extend-exclude = ["chroma_data"]
+ 
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+ignore = ["B008"]
+ 
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+docstring-code-format = true

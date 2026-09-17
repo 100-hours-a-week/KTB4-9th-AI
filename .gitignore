@@ -1,0 +1,36 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+build/
+dist/
+
+# ===== 가상환경 (uv) =====
+.venv/
+
+# ===== 환경변수 / 비밀값 =====
+.env
+.env.*
+!.env.example
+
+# ===== 테스트 / 도구 캐시 =====
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ===== 로컬 데이터 =====
+*.db
+*.sqlite3
+logs/
+*.log
+
+# ===== IDE =====
+.vscode/
+.idea/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
