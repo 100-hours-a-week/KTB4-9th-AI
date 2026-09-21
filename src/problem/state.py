@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, Field
@@ -6,19 +6,19 @@ from pydantic import BaseModel, Field
 from src.problem.schema import Difficulty
 
 
-class Language(str, Enum):
+class Language(StrEnum):
     PYTHON = "python"
     JAVA = "java"
     JAVASCRIPT = "javascript"
     CPP = "cpp"
 
 
-class ConstraintScope(str, Enum):
+class ConstraintScope(StrEnum):
     INPUT = "input"
     OUTPUT = "output"
 
 
-class ConstraintDataType(str, Enum):
+class ConstraintDataType(StrEnum):
     INT = "int"
     LONG = "long"
     DOUBLE = "double"
@@ -27,7 +27,7 @@ class ConstraintDataType(str, Enum):
     BOOLEAN = "bool"
 
 
-class DiscardReason(str, Enum):
+class DiscardReason(StrEnum):
     EMPTY_FIELD = "empty_field"
     EXAMPLE_OUT_OF_RANGE = "example_out_of_range"
     MISMATCH_TYPE = "mismatch_type"

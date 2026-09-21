@@ -1,9 +1,9 @@
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel
 
 
-class Difficulty(str, Enum):
+class Difficulty(StrEnum):
     """문제 난이도."""
 
     LV1 = "LV1"
@@ -13,7 +13,7 @@ class Difficulty(str, Enum):
     LV5 = "LV5"
 
 
-class Category(str, Enum):
+class Category(StrEnum):
     """문제 카테고리 (요청용). RANDOM은 카테고리를 지정하지 않음을 뜻한다."""
 
     RANDOM = "RANDOM"
