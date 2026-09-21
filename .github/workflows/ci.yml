@@ -1,0 +1,77 @@
+name: AI CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-validate:
+    name: Lint, Test and Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --locked --group dev
+      - name: Run Ruff
+        run: uv run ruff check .
+      - name: Run tests
+        run: uv run python -m pytest -q
+      - name: Verify app startup and health endpoint
+        run: |
+          uv run python - <<'PY'
+          from fastapi.testclient import TestClient
+          from src.api import app
+
+          response = TestClient(app).get('/health')
+          assert response.status_code == 200, response.text
+          assert response.json() == {'status': 'ok'}
+          PY
+      - name: Verify Docker image builds
+        run: docker build -f dockerfile -t ai-test:${{ github.sha }} .
+
+  build-and-push:
+    name: Build and Push Docker Image
+    needs: test-and-validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE_REPOSITORY: ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.DOCKERHUB_REPOSITORY }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Docker Hub settings
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          : "${DOCKERHUB_USERNAME:?DOCKERHUB_USERNAME secret is required}"
+          : "${DOCKERHUB_TOKEN:?DOCKERHUB_TOKEN secret is required}"
+          : "${DOCKERHUB_REPOSITORY:?DOCKERHUB_REPOSITORY variable is required}"
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push image
+        run: |
+          docker build --pull -f dockerfile -t "${IMAGE_REPOSITORY}:${IMAGE_TAG}" .
+          docker push "${IMAGE_REPOSITORY}:${IMAGE_TAG}"

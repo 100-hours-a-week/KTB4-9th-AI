@@ -1,0 +1,71 @@
+name: AI CD
+
+on:
+  workflow_run:
+    workflows: [ "AI CI" ]
+    branches: [ main ]
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to EC2 via Blue/Green
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    # CI 워크플로우가 'success'로 끝났을 때만 배포 진행
+    if: >-
+      ${{
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_run' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.conclusion == 'success')
+      }}
+
+    env:
+      IMAGE_REPOSITORY: ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.DOCKERHUB_REPOSITORY }}
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+    steps:
+      - name: Validate deployment settings
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          : "${EC2_HOST:?required}"
+          : "${EC2_USER:?required}"
+          : "${EC2_SSH_PRIVATE_KEY:?required}"
+          : "${EC2_KNOWN_HOSTS:?required}"
+          : "${DOCKERHUB_USERNAME:?required}"
+          : "${DOCKERHUB_REPOSITORY:?required}"
+
+      - name: Configure SSH Key
+        run: |
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > "${RUNNER_TEMP}/ec2_key"
+          printf '%s\n' "${{ secrets.EC2_KNOWN_HOSTS }}" > "${HOME}/.ssh/known_hosts"
+          chmod 600 "${RUNNER_TEMP}/ec2_key" "${HOME}/.ssh/known_hosts"
+
+      - name: Execute Blue/Green Deployment Script
+        run: |
+          echo "EC2 메인 서버에 접속하여 신규 이미지(${IMAGE_REPOSITORY}:${IMAGE_TAG}) 무중단 배포를 실행합니다."
+          ssh \
+            -i "${RUNNER_TEMP}/ec2_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+            "/opt/cosmos/deploy-ai.sh '${IMAGE_REPOSITORY}:${IMAGE_TAG}'"

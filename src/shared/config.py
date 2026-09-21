@@ -22,6 +22,8 @@ class Settings(BaseSettings):
             f"postgresql+psycopg://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
+      
+    gemini_api_key: str | None = None
 
 
 @lru_cache
