@@ -2,6 +2,7 @@
 아직 구현되지 않은 노드의 임시 구현.
 
 실제 노드가 완성되면 graph.py의 DEFAULT_NODES에서 해당 항목을 교체한다.
+LLM을 호출하는 노드의 임시 구현은 그래프 테스트에서 계속 사용한다.
 """
 
 from src.problem.state import (
@@ -22,6 +23,7 @@ async def generate_problem(state: GraphState) -> dict:
         "difficulty": state.requested_difficulty,
         "category": state.requested_category,
         "category_select_reason": "임시 문제",
+        "algorithm_core": "해시맵으로 M - x의 등장 횟수를 누적해 합이 M인 쌍의 수를 센다",
         "problem_title": "합이 M인 쌍의 개수",
         "problem_description": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
         "input_format": "첫째 줄에 N과 M, 둘째 줄에 N개의 정수가 주어진다.",

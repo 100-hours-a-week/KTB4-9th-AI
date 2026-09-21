@@ -10,7 +10,7 @@ from src.problem.state import (
 from src.shared.llm import LLMOutputParseError, call_llm, parse_json
 
 MODEL_NAME = "gemini-3.5-flash-lite"
-PROMPT_VERSION = "generate_problem/v1"
+PROMPT_VERSION = "generate_problem/v2"
 
 GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 
@@ -32,6 +32,7 @@ GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 - 값들이 서로 달라야 하면 special_conditions에 "서로 다른 값"이라고 적는다.
 - execution_limits는 {languages} 네 언어를 모두 적는다.
 - category_select_reason에는 이 카테고리로 판단한 근거를 한 문장으로 적는다.
+- algorithm_core에는 입출력 형식과 이야기 설정을 빼고, 어떤 자료구조·알고리즘으로 무엇을 계산하는지 한 문장으로 적는다.
 - JSON 외의 텍스트는 출력하지 않는다.
 
 [출력 형식]
@@ -39,6 +40,7 @@ GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
   "difficulty": "{difficulty}",
   "category": "카테고리",
   "category_select_reason": "한 문장",
+  "algorithm_core": "핵심 풀이 아이디어 한 문장",
   "problem_title": "문제 제목",
   "problem_description": "문제 지문",
   "input_format": "입력 형식 설명",
@@ -123,7 +125,7 @@ def build_prompt(state: GraphState, few_shot: list[dict]) -> str:
 
 async def generate_problem(state: GraphState) -> dict:
     """
-    요청 난이도·카테고리로 문제 지문, 제약, 공개 예시를 생성한다.
+    요청 난이도·카테고리로 문제 지문, 제약, 공개 예시, 핵심 풀이 아이디어를 생성한다.
 
     Parameters:
         state (GraphState): 요청 난이도·카테고리가 담긴 상태
@@ -152,6 +154,7 @@ async def generate_problem(state: GraphState) -> dict:
             "difficulty": Difficulty(data["difficulty"]),
             "category": data["category"],
             "category_select_reason": data["category_select_reason"],
+            "algorithm_core": data["algorithm_core"],
             "problem_title": data["problem_title"],
             "problem_description": data["problem_description"],
             "input_format": data["input_format"],

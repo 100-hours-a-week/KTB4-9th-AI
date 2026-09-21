@@ -12,6 +12,7 @@ VALID_RESPONSE = {
     "difficulty": "LV2",
     "category": "DP",
     "category_select_reason": "부분 문제의 최적해를 누적해 구하는 문제",
+    "algorithm_core": "직전 두 계단까지의 방법 수를 더해 N번째 계단의 방법 수를 누적한다",
     "problem_title": "계단 오르기",
     "problem_description": "한 번에 1칸 또는 2칸씩 오를 때 N칸 계단을 오르는 방법의 수",
     "input_format": "첫째 줄에 N이 주어진다.",
@@ -58,6 +59,7 @@ async def test_정상_응답을_상태_필드로_변환한다(monkeypatch):
 
     assert result["difficulty"] == Difficulty.LV2
     assert result["problem_title"] == "계단 오르기"
+    assert result["algorithm_core"].startswith("직전 두 계단")
     assert result["input_constraints"][1].data_type == ConstraintDataType.LONG
     assert len(result["execution_limits"]) == 4
     assert "generate_problem" in result["node_models"]
@@ -66,6 +68,15 @@ async def test_정상_응답을_상태_필드로_변환한다(monkeypatch):
 @pytest.mark.asyncio
 async def test_필드가_빠지면_파싱_에러를_낸다(monkeypatch):
     broken = {k: v for k, v in VALID_RESPONSE.items() if k != "problem_title"}
+    fix_llm_response(monkeypatch, json.dumps(broken, ensure_ascii=False))
+
+    with pytest.raises(LLMOutputParseError):
+        await generate_problem(make_state())
+
+
+@pytest.mark.asyncio
+async def test_핵심_풀이_아이디어가_빠지면_파싱_에러를_낸다(monkeypatch):
+    broken = {k: v for k, v in VALID_RESPONSE.items() if k != "algorithm_core"}
     fix_llm_response(monkeypatch, json.dumps(broken, ensure_ascii=False))
 
     with pytest.raises(LLMOutputParseError):
@@ -94,3 +105,9 @@ def test_카테고리를_지정하면_그대로_쓰게_한다():
     prompt = build_prompt(make_state("DP"), [])
 
     assert "DP (category에 그대로 적는다)" in prompt
+
+
+def test_프롬프트에_핵심_풀이_아이디어를_요구한다():
+    prompt = build_prompt(make_state("DP"), [])
+
+    assert '"algorithm_core"' in prompt
