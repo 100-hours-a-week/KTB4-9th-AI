@@ -4,6 +4,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from src.problem.nodes import stubs
+from src.problem.nodes.generate_problem import generate_problem
 from src.problem.nodes.static_validate import static_validate
 from src.problem.state import GraphState
 
@@ -17,7 +18,7 @@ PARALLEL_NODES = [
 
 # 노드 이름 → 실행 함수. 실제 노드가 완성되면 stubs 항목을 교체한다.
 DEFAULT_NODES: dict[str, NodeFn] = {
-    "generate_problem": stubs.generate_problem,
+    "generate_problem": generate_problem,
     "static_validate": static_validate,
     "check_duplicate": stubs.check_duplicate,
     "generate_ref_code": stubs.generate_ref_code,

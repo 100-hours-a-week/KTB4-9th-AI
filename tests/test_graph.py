@@ -7,6 +7,12 @@ from src.problem.state import DiscardReason, GraphState, discard
 
 INPUT = {"requested_difficulty": "LV2", "requested_category": "DP"}
 
+# 그래프 테스트는 실제 LLM을 호출하지 않도록 LLM 노드를 임시 구현으로 고정한다.
+OFFLINE_NODES = {
+    "generate_problem": stubs.generate_problem,
+    "generate_ref_code": stubs.generate_ref_code,
+}
+
 
 async def run(overrides: dict | None = None) -> GraphState:
     """
@@ -15,7 +21,8 @@ async def run(overrides: dict | None = None) -> GraphState:
     ainvoke 결과에는 노드가 값을 쓴 필드만 담기므로,
     GraphState로 감싸 나머지 필드를 기본값으로 채운다.
     """
-    result = await build_graph(overrides).ainvoke(INPUT)
+    graph = build_graph({**OFFLINE_NODES, **(overrides or {})})
+    result = await graph.ainvoke(INPUT)
     return GraphState(**result)
 
 
