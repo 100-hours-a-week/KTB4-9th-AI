@@ -23,7 +23,9 @@ async def generate_problem(state: GraphState) -> dict:
         "difficulty": state.requested_difficulty,
         "category": state.requested_category,
         "category_select_reason": "임시 문제",
-        "algorithm_core": "해시맵으로 M - x의 등장 횟수를 누적해 합이 M인 쌍의 수를 센다",
+        "algorithm_core": (
+            "해시맵으로 M - x의 등장 횟수를 누적해 합이 M인 쌍의 수를 센다"
+        ),
         "problem_title": "합이 M인 쌍의 개수",
         "problem_description": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
         "input_format": "첫째 줄에 N과 M, 둘째 줄에 N개의 정수가 주어진다.",

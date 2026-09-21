@@ -12,7 +12,9 @@ VALID_RESPONSE = {
     "difficulty": "LV2",
     "category": "DP",
     "category_select_reason": "부분 문제의 최적해를 누적해 구하는 문제",
-    "algorithm_core": "직전 두 계단까지의 방법 수를 더해 N번째 계단의 방법 수를 누적한다",
+    "algorithm_core": (
+        "직전 두 계단까지의 방법 수를 더해 N번째 계단의 방법 수를 누적한다"
+    ),
     "problem_title": "계단 오르기",
     "problem_description": "한 번에 1칸 또는 2칸씩 오를 때 N칸 계단을 오르는 방법의 수",
     "input_format": "첫째 줄에 N이 주어진다.",

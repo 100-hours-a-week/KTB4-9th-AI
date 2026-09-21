@@ -26,13 +26,15 @@ GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 - difficulty에는 요청 난이도 {difficulty}를 그대로 적는다.
 - 공개 예시는 1~3개이며, 모든 예시는 제약 조건을 만족해야 한다.
 - 예시의 output은 input을 실제로 풀었을 때 나오는 정확한 값이어야 한다.
-- input_constraints에는 입력 항목(scope: input)과 출력(scope: output, target: output)을 모두 적는다.
+- input_constraints에는 입력 항목(scope: input)과
+  출력(scope: output, target: output)을 모두 적는다.
 - data_type은 int, long, double, str, char, bool 중 하나다.
 - min_value, max_value는 숫자 문자열로 적는다. 문자열 자료형이면 null이다.
 - 값들이 서로 달라야 하면 special_conditions에 "서로 다른 값"이라고 적는다.
 - execution_limits는 {languages} 네 언어를 모두 적는다.
 - category_select_reason에는 이 카테고리로 판단한 근거를 한 문장으로 적는다.
-- algorithm_core에는 입출력 형식과 이야기 설정을 빼고, 어떤 자료구조·알고리즘으로 무엇을 계산하는지 한 문장으로 적는다.
+- algorithm_core에는 입출력 형식과 이야기 설정을 빼고,
+  어떤 자료구조·알고리즘으로 무엇을 계산하는지 한 문장으로 적는다.
 - JSON 외의 텍스트는 출력하지 않는다.
 
 [출력 형식]
