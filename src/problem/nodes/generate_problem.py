@@ -1,3 +1,5 @@
+from pydantic import BaseModel, Field
+
 from src.problem.schema import Category, Difficulty
 from src.problem.state import (
     Example,
@@ -7,10 +9,10 @@ from src.problem.state import (
     Language,
     LLMConfig,
 )
-from src.shared.llm import LLMOutputParseError, call_llm, parse_json
+from src.shared.llm import LLMOutputParseError, call_llm_structured
 
 MODEL_NAME = "gemini-3.5-flash-lite"
-PROMPT_VERSION = "generate_problem/v2"
+PROMPT_VERSION = "generate_problem/v3"
 
 GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 
@@ -28,40 +30,31 @@ GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 - 예시의 output은 input을 실제로 풀었을 때 나오는 정확한 값이어야 한다.
 - input_constraints에는 입력 항목(scope: input)과
   출력(scope: output, target: output)을 모두 적는다.
-- data_type은 int, long, double, str, char, bool 중 하나다.
-- min_value, max_value는 숫자 문자열로 적는다. 문자열 자료형이면 null이다.
+- min_value, max_value는 숫자 문자열로 적는다. 문자열 자료형이면 비워 둔다.
 - 값들이 서로 달라야 하면 special_conditions에 "서로 다른 값"이라고 적는다.
 - execution_limits는 {languages} 네 언어를 모두 적는다.
 - category_select_reason에는 이 카테고리로 판단한 근거를 한 문장으로 적는다.
 - algorithm_core에는 입출력 형식과 이야기 설정을 빼고,
   어떤 자료구조·알고리즘으로 무엇을 계산하는지 한 문장으로 적는다.
-- JSON 외의 텍스트는 출력하지 않는다.
-
-[출력 형식]
-{{
-  "difficulty": "{difficulty}",
-  "category": "카테고리",
-  "category_select_reason": "한 문장",
-  "algorithm_core": "핵심 풀이 아이디어 한 문장",
-  "problem_title": "문제 제목",
-  "problem_description": "문제 지문",
-  "input_format": "입력 형식 설명",
-  "output_format": "출력 형식 설명",
-  "problem_examples": [
-    {{"input": "입력", "output": "출력", "explanation": "설명"}}
-  ],
-  "input_constraints": [
-    {{"target": "N", "scope": "input", "data_type": "int",
-      "min_value": "1", "max_value": "100000", "data_count": 1,
-      "special_conditions": []}}
-  ],
-  "execution_limits": [
-    {{"language": "python", "time_limit_ms": 2000, "memory_limit_kb": 262144}}
-  ]
-}}
 """
 
 RESPONSE_CATEGORIES = [c.value for c in Category if c != Category.RANDOM]
+
+
+class GeneratedProblem(BaseModel):
+    """문제 생성 응답 형식. 모델은 이 구조와 enum 값으로만 응답한다."""
+
+    difficulty: Difficulty
+    category: Category
+    category_select_reason: str
+    algorithm_core: str = Field(description="입출력 형식을 뺀 핵심 풀이 한 문장")
+    problem_title: str
+    problem_description: str
+    input_format: str
+    output_format: str
+    problem_examples: list[Example]
+    input_constraints: list[InputConstraint]
+    execution_limits: list[ExecutionLimit]
 
 
 async def fetch_few_shot(difficulty: Difficulty, category: str, k: int) -> list[dict]:
@@ -136,7 +129,7 @@ async def generate_problem(state: GraphState) -> dict:
         dict: 생성한 문제 필드와 호출 설정
 
     Raises:
-        LLMOutputParseError: 응답이 기대한 형식이 아닌 경우
+        LLMOutputParseError: 응답이 형식에 맞지 않거나 카테고리가 RANDOM인 경우
     """
     cfg = LLMConfig(
         model_name=MODEL_NAME,
@@ -149,26 +142,22 @@ async def generate_problem(state: GraphState) -> dict:
         state.requested_difficulty, state.requested_category, cfg.top_k
     )
     prompt = build_prompt(state, few_shot)
-    data = parse_json(await call_llm(prompt, cfg))
+    problem = await call_llm_structured(prompt, cfg, GeneratedProblem)
 
-    try:
-        return {
-            "difficulty": Difficulty(data["difficulty"]),
-            "category": data["category"],
-            "category_select_reason": data["category_select_reason"],
-            "algorithm_core": data["algorithm_core"],
-            "problem_title": data["problem_title"],
-            "problem_description": data["problem_description"],
-            "input_format": data["input_format"],
-            "output_format": data["output_format"],
-            "problem_examples": [Example(**e) for e in data["problem_examples"]],
-            "input_constraints": [
-                InputConstraint(**c) for c in data["input_constraints"]
-            ],
-            "execution_limits": [
-                ExecutionLimit(**lim) for lim in data["execution_limits"]
-            ],
-            "node_models": {"generate_problem": cfg},
-        }
-    except (KeyError, TypeError, ValueError) as error:
-        raise LLMOutputParseError(f"문제 생성 응답 형식 오류: {error}") from error
+    if problem.category == Category.RANDOM:
+        raise LLMOutputParseError("응답 카테고리로 RANDOM은 허용되지 않음")
+
+    return {
+        "difficulty": problem.difficulty,
+        "category": problem.category.value,
+        "category_select_reason": problem.category_select_reason,
+        "algorithm_core": problem.algorithm_core,
+        "problem_title": problem.problem_title,
+        "problem_description": problem.problem_description,
+        "input_format": problem.input_format,
+        "output_format": problem.output_format,
+        "problem_examples": problem.problem_examples,
+        "input_constraints": problem.input_constraints,
+        "execution_limits": problem.execution_limits,
+        "node_models": {"generate_problem": cfg},
+    }

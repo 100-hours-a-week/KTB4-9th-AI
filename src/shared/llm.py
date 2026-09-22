@@ -1,7 +1,8 @@
-import json
 import re
 
+from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel
 
 from src.problem.state import LLMConfig
 from src.shared.config import get_settings
@@ -10,69 +11,39 @@ FENCE_PATTERN = re.compile(r"^```[a-zA-Z]*\n(.*?)\n?```$", re.DOTALL)
 
 
 class LLMOutputParseError(Exception):
-    """모델 응답을 JSON으로 해석할 수 없을 때 발생한다."""
+    """모델 응답을 기대한 형식으로 해석할 수 없을 때 발생한다."""
 
 
 def strip_code_fence(text: str) -> str:
     """
-    응답을 감싼 코드펜스(```)를 제거한다.
+    코드 문자열을 감싼 코드펜스(```)나 인라인 코드 표시(`)를 제거한다.
 
     Parameters:
-        text (str): 모델 응답 원문
+        text (str): 모델이 생성한 코드 문자열
 
     Returns:
-        str: 코드펜스를 제거한 본문. 코드펜스가 없으면 앞뒤 공백만 제거
+        str: 감싼 표시를 제거한 본문. 없으면 앞뒤 공백만 제거
     """
     stripped = text.strip()
     match = FENCE_PATTERN.match(stripped)
-    return match.group(1).strip() if match else stripped
+    if match:
+        return match.group(1).strip()
+    if len(stripped) >= 2 and stripped.startswith("`") and stripped.endswith("`"):
+        return stripped.strip("`").strip()
+    return stripped
 
 
-def parse_json(text: str) -> dict:
+def build_chat_model(cfg: LLMConfig) -> ChatGoogleGenerativeAI:
     """
-    모델 응답에서 JSON 객체를 꺼낸다.
-
-    코드펜스를 먼저 제거하고, 그래도 해석되지 않으면
-    처음 나오는 { 부터 마지막 } 까지만 잘라 다시 시도한다.
-
-    Parameters:
-        text (str): 모델 응답 원문
-
-    Returns:
-        dict: 해석한 JSON 객체
-
-    Raises:
-        LLMOutputParseError: JSON 객체로 해석할 수 없는 경우
-    """
-    cleaned = strip_code_fence(text)
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError:
-        start, end = cleaned.find("{"), cleaned.rfind("}")
-        if start == -1 or end <= start:
-            raise LLMOutputParseError("응답에 JSON 객체가 없음") from None
-        try:
-            data = json.loads(cleaned[start : end + 1])
-        except json.JSONDecodeError as error:
-            raise LLMOutputParseError(f"JSON 해석 실패: {error}") from error
-
-    if not isinstance(data, dict):
-        raise LLMOutputParseError("응답이 JSON 객체가 아님")
-    return data
-
-
-async def call_llm(prompt: str, cfg: LLMConfig) -> str:
-    """
-    Gemini에 프롬프트를 보내고 응답 텍스트를 반환한다.
+    설정값으로 Gemini 채팅 모델 객체를 만든다.
 
     LLMConfig.top_k는 few-shot 예시 개수이므로 모델 파라미터로 넘기지 않는다.
 
     Parameters:
-        prompt (str): 완성된 프롬프트
         cfg (LLMConfig): 모델명과 temperature를 담은 설정
 
     Returns:
-        str: 모델 응답 텍스트
+        ChatGoogleGenerativeAI: 호출 가능한 모델 객체
 
     Raises:
         RuntimeError: API 키가 설정되지 않은 경우
@@ -87,7 +58,35 @@ async def call_llm(prompt: str, cfg: LLMConfig) -> str:
     options = {"model": cfg.model_name, "google_api_key": settings.gemini_api_key}
     if cfg.temperature is not None:
         options["temperature"] = cfg.temperature
+    return ChatGoogleGenerativeAI(**options)
 
-    llm = ChatGoogleGenerativeAI(**options)
-    response = await llm.ainvoke(prompt)
-    return response.text
+
+async def call_llm_structured[T: BaseModel](
+    prompt: str, cfg: LLMConfig, schema: type[T]
+) -> T:
+    """
+    응답 형식을 지정해 Gemini를 호출하고 그 형식의 객체로 반환한다.
+
+    모든 노드의 LLM 호출은 이 함수를 사용한다.
+    노드마다 모델 설정(cfg)과 응답 형식(schema)을 다르게 넘긴다.
+
+    Parameters:
+        prompt (str): 완성된 프롬프트
+        cfg (LLMConfig): 모델 설정
+        schema (type[T]): 응답 형식을 정의한 Pydantic 클래스
+
+    Returns:
+        T: schema 형식으로 검증된 응답 객체
+
+    Raises:
+        LLMOutputParseError: 응답이 형식에 맞지 않거나 비어 있는 경우
+    """
+    structured = build_chat_model(cfg).with_structured_output(schema)
+    try:
+        result = await structured.ainvoke(prompt)
+    except (OutputParserException, ValueError) as error:
+        raise LLMOutputParseError(f"구조화 응답 해석 실패: {error}") from error
+
+    if not isinstance(result, schema):
+        raise LLMOutputParseError("구조화 응답이 비어 있음")
+    return result

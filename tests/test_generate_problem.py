@@ -1,14 +1,17 @@
-import json
-
 import pytest
+from pydantic import ValidationError
 
 from src.problem.nodes import generate_problem as module
-from src.problem.nodes.generate_problem import build_prompt, generate_problem
+from src.problem.nodes.generate_problem import (
+    GeneratedProblem,
+    build_prompt,
+    generate_problem,
+)
 from src.problem.schema import Difficulty
-from src.problem.state import ConstraintDataType, GraphState, Language
+from src.problem.state import ConstraintDataType, Example, GraphState, Language
 from src.shared.llm import LLMOutputParseError
 
-VALID_RESPONSE = {
+VALID_PROBLEM = {
     "difficulty": "LV2",
     "category": "DP",
     "category_select_reason": "부분 문제의 최적해를 누적해 구하는 문제",
@@ -41,13 +44,23 @@ VALID_RESPONSE = {
 }
 
 
-def fix_llm_response(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
-    """Gemini 호출 대신 정해진 응답을 돌려주도록 바꿔 끼운다."""
+def make_problem(**overrides) -> GeneratedProblem:
+    return GeneratedProblem(**{**VALID_PROBLEM, **overrides})
 
-    async def fake(prompt: str, cfg) -> str:
-        return text
 
-    monkeypatch.setattr(module, "call_llm", fake)
+def fix_structured_response(
+    monkeypatch: pytest.MonkeyPatch,
+    result: GeneratedProblem | None = None,
+    error: Exception | None = None,
+) -> None:
+    """구조화 호출 대신 정해진 객체나 에러를 돌려주도록 바꿔 끼운다."""
+
+    async def fake(prompt: str, cfg, schema):
+        if error:
+            raise error
+        return result
+
+    monkeypatch.setattr(module, "call_llm_structured", fake)
 
 
 def make_state(category: str = "DP") -> GraphState:
@@ -55,44 +68,46 @@ def make_state(category: str = "DP") -> GraphState:
 
 
 @pytest.mark.asyncio
-async def test_정상_응답을_상태_필드로_변환한다(monkeypatch):
-    fix_llm_response(monkeypatch, json.dumps(VALID_RESPONSE, ensure_ascii=False))
+async def test_구조화_응답을_상태_필드로_옮긴다(monkeypatch):
+    fix_structured_response(monkeypatch, result=make_problem())
     result = await generate_problem(make_state())
 
     assert result["difficulty"] == Difficulty.LV2
+    assert result["category"] == "DP"
     assert result["problem_title"] == "계단 오르기"
     assert result["algorithm_core"].startswith("직전 두 계단")
+    assert isinstance(result["problem_examples"][0], Example)
     assert result["input_constraints"][1].data_type == ConstraintDataType.LONG
     assert len(result["execution_limits"]) == 4
     assert "generate_problem" in result["node_models"]
 
 
 @pytest.mark.asyncio
-async def test_필드가_빠지면_파싱_에러를_낸다(monkeypatch):
-    broken = {k: v for k, v in VALID_RESPONSE.items() if k != "problem_title"}
-    fix_llm_response(monkeypatch, json.dumps(broken, ensure_ascii=False))
+async def test_응답_카테고리가_RANDOM이면_파싱_에러를_낸다(monkeypatch):
+    fix_structured_response(monkeypatch, result=make_problem(category="RANDOM"))
 
     with pytest.raises(LLMOutputParseError):
         await generate_problem(make_state())
 
 
 @pytest.mark.asyncio
-async def test_핵심_풀이_아이디어가_빠지면_파싱_에러를_낸다(monkeypatch):
-    broken = {k: v for k, v in VALID_RESPONSE.items() if k != "algorithm_core"}
-    fix_llm_response(monkeypatch, json.dumps(broken, ensure_ascii=False))
+async def test_구조화_호출이_실패하면_파싱_에러가_전달된다(monkeypatch):
+    fix_structured_response(monkeypatch, error=LLMOutputParseError("형식 불일치"))
 
     with pytest.raises(LLMOutputParseError):
         await generate_problem(make_state())
 
 
-@pytest.mark.asyncio
-async def test_자료형이_enum에_없으면_파싱_에러를_낸다(monkeypatch):
-    broken = json.loads(json.dumps(VALID_RESPONSE))
-    broken["input_constraints"][0]["data_type"] = "integer"
-    fix_llm_response(monkeypatch, json.dumps(broken, ensure_ascii=False))
+def test_응답_형식은_목록에_없는_카테고리를_거부한다():
+    with pytest.raises(ValidationError):
+        make_problem(category="동적 계획법")
 
-    with pytest.raises(LLMOutputParseError):
-        await generate_problem(make_state())
+
+def test_응답_형식은_핵심_풀이_아이디어가_빠지면_거부한다():
+    data = {k: v for k, v in VALID_PROBLEM.items() if k != "algorithm_core"}
+
+    with pytest.raises(ValidationError):
+        GeneratedProblem(**data)
 
 
 def test_RANDOM이면_카테고리_목록에서_고르게_한다():
@@ -109,7 +124,7 @@ def test_카테고리를_지정하면_그대로_쓰게_한다():
     assert "DP (category에 그대로 적는다)" in prompt
 
 
-def test_프롬프트에_핵심_풀이_아이디어를_요구한다():
+def test_프롬프트에_핵심_풀이_아이디어_규칙이_있다():
     prompt = build_prompt(make_state("DP"), [])
 
-    assert '"algorithm_core"' in prompt
+    assert "algorithm_core" in prompt

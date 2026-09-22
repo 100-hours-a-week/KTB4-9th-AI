@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from src.problem.nodes.generate_ref_code import generate_ref_code
 
 from src.problem.nodes import stubs
 from src.problem.nodes.generate_problem import generate_problem
@@ -21,7 +22,7 @@ DEFAULT_NODES: dict[str, NodeFn] = {
     "generate_problem": generate_problem,
     "static_validate": static_validate,
     "check_duplicate": stubs.check_duplicate,
-    "generate_ref_code": stubs.generate_ref_code,
+    "generate_ref_code": generate_ref_code,
     "semantic_validate": stubs.semantic_validate,
     "generate_testcases": stubs.generate_testcases,
     "generate_solution_code": stubs.generate_solution_code,
