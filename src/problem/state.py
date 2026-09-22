@@ -1,50 +1,24 @@
-from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from src.problem.schema import Difficulty
+from src.enum import (
+    ConstraintDataType,
+    ConstraintScope,
+    Difficulty,
+    DiscardReason,
+    Language,
+)
+
+HIDDEN_TEST_CASE_COUNT = 20
 
 
-class Language(StrEnum):
-    PYTHON = "python"
-    JAVA = "java"
-    JAVASCRIPT = "javascript"
-    CPP = "cpp"
-
-
-class ConstraintScope(StrEnum):
-    INPUT = "input"
-    OUTPUT = "output"
-
-
-class ConstraintDataType(StrEnum):
-    INT = "int"
-    LONG = "long"
-    DOUBLE = "double"
-    STRING = "str"
-    CHAR = "char"
-    BOOLEAN = "bool"
-
-
-class DiscardReason(StrEnum):
-    EMPTY_FIELD = "empty_field"
-    EXAMPLE_OUT_OF_RANGE = "example_out_of_range"
-    MISMATCH_TYPE = "mismatch_type"
-    CONSTRAINT_CONFLICT = "constraint_conflict"
-    MISMATCH_LABEL = "mismatch_label"
-    DUPLICATE = "duplicate"
-    MAX_ATTEMPT_EXCEEDED = "max_attempt_exceeded"
-    PROBLEM_CONTRADICTION = "problem_contradiction"
-    CONSTRAINT_CONTRADICTION = "constraint_contradiction"
-
-
-class Example(BaseModel):
+class ProblemExample(BaseModel):
     """problem_examples. 문제당 최대 3개 (display_order 1~3)"""
 
     input: str
     output: str
-    explanation: str | None = None
+    description: str | None = None
 
 
 class InputConstraint(BaseModel):
@@ -67,11 +41,11 @@ class ExecutionLimit(BaseModel):
     memory_limit_kb: int
 
 
-class TestCase(BaseModel):
-    """test_cases. 문제당 최대 100개 (display_order 1~100)"""
+class HiddenTestCase(BaseModel):
+    """test_cases. 문제당 HIDDEN_TEST_CASE_COUNT개 (display_order 1~20)"""
 
     input: str
-    expected_output: str
+    output: str
 
 
 class HintComment(BaseModel):
@@ -79,7 +53,7 @@ class HintComment(BaseModel):
     content: str | None = None
 
 
-class HintSolutionCode(BaseModel):
+class SolutionCode(BaseModel):
     language: Language
     content: str | None = None
 
@@ -90,6 +64,23 @@ class LLMConfig(BaseModel):
     prompt_version: str | None = None
     temperature: float | None = None
     top_k: int | None = 3
+
+
+def keep_discard_flag(left: bool, right: bool) -> bool:
+    """리듀서가 없으면 병렬 노드 둘이 동시에 폐기할 때 그래프가 죽는다.
+
+    폐기는 되돌리지 않으므로 한 번 True가 되면 그대로 둔다.
+    """
+    return left or right
+
+
+def keep_first_discard[T](left: T | None, right: T | None) -> T | None:
+    """먼저 기록된 폐기 정보를 남긴다.
+
+    reason과 detail에 같은 규칙을 써야 둘이 짝을 유지한다.
+    같은 단계에서 다른 노드도 실패했다면 그 사유는 버려진다.
+    """
+    return left if left is not None else right
 
 
 def merge_node_models(
@@ -119,19 +110,19 @@ class GraphState(BaseModel):
     category: str | None = None
     category_select_reason: str | None = None
     problem_title: str | None = None
-    problem_description: str | None = None
+    problem_content: str | None = None
     input_format: str | None = None
     output_format: str | None = None
-    problem_examples: list[Example] = Field(default_factory=list)
+    problem_examples: list[ProblemExample] = Field(default_factory=list)
     input_constraints: list[InputConstraint] = Field(default_factory=list)
     execution_limits: list[ExecutionLimit] = Field(default_factory=list)
 
     # ---- testcase
-    hidden_test_cases: list[TestCase] = Field(default_factory=list)
+    hidden_test_cases: list[HiddenTestCase] = Field(default_factory=list)
 
-    # ---- hint
+    # ---- 정답 코드와 힌트 (generate_solution_code가 함께 채운다)
+    solution_codes: list[SolutionCode] = Field(default_factory=list)
     hint_comments: list[HintComment] = Field(default_factory=list)
-    hint_solution_codes: list[HintSolutionCode] = Field(default_factory=list)
 
     # ---- nl keywords
     solution_keywords: list[str] = Field(default_factory=list)
@@ -152,10 +143,10 @@ class GraphState(BaseModel):
     semantic_validation_attempt: int = 0
     semantic_validation_max_attempt: int = 3
 
-    # ---- 폐기 이유
-    is_discarded: bool = False
-    discard_reason: DiscardReason | None = None
-    discard_detail: str | None = None
+    # ---- 폐기 이유 (병렬 노드가 동시에 써도 되도록 리듀서를 둔다)
+    is_discarded: Annotated[bool, keep_discard_flag] = False
+    discard_reason: Annotated[DiscardReason | None, keep_first_discard] = None
+    discard_detail: Annotated[str | None, keep_first_discard] = None
 
     # ---- 분석용
     node_models: Annotated[dict[str, LLMConfig], merge_node_models] = Field(

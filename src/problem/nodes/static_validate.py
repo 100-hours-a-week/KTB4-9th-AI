@@ -1,13 +1,7 @@
 import re
 
-from src.problem.state import (
-    ConstraintDataType,
-    ConstraintScope,
-    DiscardReason,
-    GraphState,
-    Language,
-    discard,
-)
+from src.enum import ConstraintDataType, ConstraintScope, DiscardReason, Language
+from src.problem.state import GraphState, discard
 
 NUMERIC_TYPES = {
     ConstraintDataType.INT,
@@ -83,7 +77,7 @@ async def static_validate(state: GraphState) -> dict:
         "난이도": state.difficulty,
         "카테고리": state.category,
         "문제 제목": state.problem_title,
-        "문제 지문": state.problem_description,
+        "문제 지문": state.problem_content,
         "입력 포맷": state.input_format,
         "출력 포맷": state.output_format,
         "예시": state.problem_examples,

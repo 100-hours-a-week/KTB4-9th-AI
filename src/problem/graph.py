@@ -2,20 +2,34 @@ from collections.abc import Awaitable, Callable
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from src.problem.nodes.generate_ref_code import generate_ref_code
 
 from src.problem.nodes import stubs
+from src.problem.nodes.generate_nl_keyword import generate_nl_keyword
 from src.problem.nodes.generate_problem import generate_problem
+from src.problem.nodes.generate_ref_code import generate_ref_code
+from src.problem.nodes.generate_solution_code import generate_solution_code
+from src.problem.nodes.generate_testcase import generate_testcase
 from src.problem.nodes.static_validate import static_validate
 from src.problem.state import GraphState
 
 NodeFn = Callable[[GraphState], Awaitable[dict]]
 
 PARALLEL_NODES = [
-    "generate_testcases",
+    "generate_testcase",
     "generate_solution_code",
-    "generate_nl_solution",
+    "generate_nl_keyword",
 ]
+
+
+async def collect_parallel(state: GraphState) -> dict:
+    """병렬 생성 노드 셋의 합류 지점. 상태를 바꾸지 않는다.
+
+    병렬 노드에 조건부 엣지를 직접 달면 성공한 노드는 자기 결과만 반영된
+    상태를 보고 finalize로 가 버린다. 배리어를 하나 두어야 셋의 결과가
+    모두 병합된 상태에서 한 번만 분기할 수 있다.
+    """
+    return {}
+
 
 # 노드 이름 → 실행 함수. 실제 노드가 완성되면 stubs 항목을 교체한다.
 DEFAULT_NODES: dict[str, NodeFn] = {
@@ -24,9 +38,10 @@ DEFAULT_NODES: dict[str, NodeFn] = {
     "check_duplicate": stubs.check_duplicate,
     "generate_ref_code": generate_ref_code,
     "semantic_validate": stubs.semantic_validate,
-    "generate_testcases": stubs.generate_testcases,
-    "generate_solution_code": stubs.generate_solution_code,
-    "generate_nl_solution": stubs.generate_nl_solution,
+    "generate_testcase": generate_testcase,
+    "generate_solution_code": generate_solution_code,
+    "generate_nl_keyword": generate_nl_keyword,
+    "collect_parallel": collect_parallel,
     "finalize": stubs.finalize,
     "discard_problem": stubs.discard_problem,
 }
@@ -56,6 +71,11 @@ def route_after_semantic(state: GraphState) -> str | list[str]:
     if state.is_semantically_valid:
         return PARALLEL_NODES
     return "generate_ref_code"
+
+
+def route_after_parallel(state: GraphState) -> str:
+    """병렬 생성 결과 합류 후. 하나라도 폐기했으면 저장하지 않는다."""
+    return "discard_problem" if state.is_discarded else "finalize"
 
 
 def build_graph(overrides: dict[str, NodeFn] | None = None) -> CompiledStateGraph:
@@ -92,7 +112,10 @@ def build_graph(overrides: dict[str, NodeFn] | None = None) -> CompiledStateGrap
         route_after_semantic,
         [*PARALLEL_NODES, "generate_ref_code", "discard_problem"],
     )
-    builder.add_edge(PARALLEL_NODES, "finalize")
+    builder.add_edge(PARALLEL_NODES, "collect_parallel")  # 셋 다 끝날 때까지 대기
+    builder.add_conditional_edges(
+        "collect_parallel", route_after_parallel, ["finalize", "discard_problem"]
+    )
     builder.add_edge("finalize", END)
     builder.add_edge("discard_problem", END)
 

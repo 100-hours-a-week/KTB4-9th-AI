@@ -27,6 +27,8 @@ class Settings(BaseSettings):
 
     backend_url: str = "http://localhost:8080"
 
+    log_level: str = "INFO"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,16 +1,18 @@
 import pytest
 
-from src.problem.nodes.static_validate import static_validate
-from src.problem.schema import Difficulty
-from src.problem.state import (
+from src.enum import (
     ConstraintDataType,
     ConstraintScope,
+    Difficulty,
     DiscardReason,
-    Example,
+    Language,
+)
+from src.problem.nodes.static_validate import static_validate
+from src.problem.state import (
     ExecutionLimit,
     GraphState,
     InputConstraint,
-    Language,
+    ProblemExample,
 )
 
 
@@ -23,10 +25,10 @@ def make_state(**overrides) -> GraphState:
         "category": "HASH_TABLE",
         "category_select_reason": "M - x 존재 여부를 O(1)에 조회하는 것이 핵심",
         "problem_title": "합이 M인 쌍의 개수",
-        "problem_description": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
+        "problem_content": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
         "input_format": "첫째 줄에 N과 M, 둘째 줄에 N개의 정수가 주어진다.",
         "output_format": "쌍의 개수를 출력한다.",
-        "problem_examples": [Example(input="5 6\n1 2 3 4 5", output="2")],
+        "problem_examples": [ProblemExample(input="5 6\n1 2 3 4 5", output="2")],
         "input_constraints": [
             InputConstraint(
                 target="N",
@@ -82,7 +84,7 @@ async def test_난이도가_다르면_폐기한다():
 
 @pytest.mark.asyncio
 async def test_정수_출력에_글자가_오면_폐기한다():
-    examples = [Example(input="5 6\n1 2 3 4 5", output="YES")]
+    examples = [ProblemExample(input="5 6\n1 2 3 4 5", output="YES")]
     result = await static_validate(make_state(problem_examples=examples))
     assert result["discard_reason"] == DiscardReason.MISMATCH_TYPE
 

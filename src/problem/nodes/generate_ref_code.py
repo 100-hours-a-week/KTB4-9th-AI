@@ -1,7 +1,8 @@
 from pydantic import BaseModel, Field
 
+from src.enum import Language
 from src.problem.render import render_problem
-from src.problem.state import GraphState, Language, LLMConfig
+from src.problem.state import GraphState, LLMConfig
 from src.shared.llm import LLMOutputParseError, call_llm_structured, strip_code_fence
 
 MODEL_NAME = "gemini-3.7-flash"

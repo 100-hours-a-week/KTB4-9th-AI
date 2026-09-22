@@ -1,14 +1,14 @@
 import pytest
 from pydantic import ValidationError
 
+from src.enum import ConstraintDataType, Difficulty, Language
 from src.problem.nodes import generate_problem as module
 from src.problem.nodes.generate_problem import (
     GeneratedProblem,
     build_prompt,
     generate_problem,
 )
-from src.problem.schema import Difficulty
-from src.problem.state import ConstraintDataType, Example, GraphState, Language
+from src.problem.state import GraphState, ProblemExample
 from src.shared.llm import LLMOutputParseError
 
 VALID_PROBLEM = {
@@ -19,7 +19,7 @@ VALID_PROBLEM = {
         "직전 두 계단까지의 방법 수를 더해 N번째 계단의 방법 수를 누적한다"
     ),
     "problem_title": "계단 오르기",
-    "problem_description": "한 번에 1칸 또는 2칸씩 오를 때 N칸 계단을 오르는 방법의 수",
+    "problem_content": "한 번에 1칸 또는 2칸씩 오를 때 N칸 계단을 오르는 방법의 수",
     "input_format": "첫째 줄에 N이 주어진다.",
     "output_format": "방법의 수를 출력한다.",
     "problem_examples": [
@@ -76,7 +76,7 @@ async def test_구조화_응답을_상태_필드로_옮긴다(monkeypatch):
     assert result["category"] == "DP"
     assert result["problem_title"] == "계단 오르기"
     assert result["algorithm_core"].startswith("직전 두 계단")
-    assert isinstance(result["problem_examples"][0], Example)
+    assert isinstance(result["problem_examples"][0], ProblemExample)
     assert result["input_constraints"][1].data_type == ConstraintDataType.LONG
     assert len(result["execution_limits"]) == 4
     assert "generate_problem" in result["node_models"]

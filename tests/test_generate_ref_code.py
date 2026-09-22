@@ -1,9 +1,10 @@
 import pytest
 
+from src.enum import Language
 from src.problem.nodes import generate_ref_code as module
 from src.problem.nodes import stubs
 from src.problem.nodes.generate_ref_code import ReferenceCode, generate_ref_code
-from src.problem.state import GraphState, Language
+from src.problem.state import GraphState
 from src.shared.llm import LLMOutputParseError
 
 
