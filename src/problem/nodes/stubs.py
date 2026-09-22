@@ -66,16 +66,16 @@ async def semantic_validate(state: GraphState) -> dict:
     return {"is_semantically_valid": True}
 
 
-async def generate_testcases(state: GraphState) -> dict:
-    return {"node_models": {"generate_testcases": LLMConfig(prompt_version="stub")}}
+async def generate_testcase(state: GraphState) -> dict:
+    return {"node_models": {"generate_testcase": LLMConfig(prompt_version="stub")}}
 
 
 async def generate_solution_code(state: GraphState) -> dict:
     return {"node_models": {"generate_solution_code": LLMConfig(prompt_version="stub")}}
 
 
-async def generate_nl_solution(state: GraphState) -> dict:
-    return {"node_models": {"generate_nl_solution": LLMConfig(prompt_version="stub")}}
+async def generate_nl_keyword(state: GraphState) -> dict:
+    return {"node_models": {"generate_nl_keyword": LLMConfig(prompt_version="stub")}}
 
 
 async def finalize(state: GraphState) -> dict:

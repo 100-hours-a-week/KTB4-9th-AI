@@ -19,9 +19,10 @@ def test_setup_logging_attaches_a_single_console_handler() -> None:
 def test_setup_logging_follows_log_level() -> None:
     setup_logging()
 
-    assert logging.getLogger().level == logging.getLevelNamesMapping()[
-        get_settings().log_level.upper()
-    ]
+    assert (
+        logging.getLogger().level
+        == logging.getLevelNamesMapping()[get_settings().log_level.upper()]
+    )
 
 
 def test_http_client_loggers_are_quieted() -> None:
