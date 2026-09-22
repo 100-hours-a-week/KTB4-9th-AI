@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.enum import (
     Category,
@@ -47,7 +47,7 @@ class Keyword(CamelBaseModel):
 class ProblemExample(CamelBaseModel):
     input: str
     output: str
-    explanation: str
+    description: str
 
 
 class HiddenTestCase(CamelBaseModel):
@@ -57,19 +57,19 @@ class HiddenTestCase(CamelBaseModel):
 
 class HintComment(CamelBaseModel):
     language: Language
-    comment: str
+    content: str
 
 
 class SolutionCode(CamelBaseModel):
     language: Language
-    code: str
+    content: str
 
 
 class Problem(CamelBaseModel):
     problem_title: str
-    problem_description: str = Field(exclude=True)
-    input_format: str = Field(exclude=True)
-    output_format: str = Field(exclude=True)
+    problem_content: str
+    input_format: str
+    output_format: str
     requested_difficulty: Difficulty
     difficulty: Difficulty
     category: Category
@@ -82,14 +82,12 @@ class Problem(CamelBaseModel):
     hint_comments: list[HintComment] = Field(default_factory=list)
     solution_codes: list[SolutionCode] = Field(default_factory=list)
 
-    @computed_field
-    @property
-    def problem_content(self) -> str:
-        return (
-            f"{self.problem_description}\n\n"
-            f"[입력]\n{self.input_format}\n\n"
-            f"[출력]\n{self.output_format}"
-        )
+
+class BattleProblem(CamelBaseModel):
+    category: Category | None = None
+    problem_title: str
+    problem_content: str
+    test_cases: list[HiddenTestCase]
 
 
 class FewshotSeedCreate(CamelBaseModel):
@@ -121,7 +119,7 @@ class BaseResponse(CamelBaseModel):
 
 class EvaluationRequest(CamelBaseModel):
     problem_title: str | None = None
-    problem_description: str | None = None
+    problem_content: str | None = None
     category: Category | None = None  # 추후 ENUM으로 교체
     category_select_reason: str | None = None
     solution_keywords: list[str] | None = None
@@ -150,7 +148,4 @@ class DailyProblemResponse(BaseResponse):
 
 
 class BattleProblemResponse(BaseResponse):
-    category: Category | None = None
-    problem_title: str
-    problem_content: str
-    test_cases: list[HiddenTestCase]
+    battle_problem: BattleProblem

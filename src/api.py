@@ -18,12 +18,17 @@ from src.shared.db_client import get_session
 app = FastAPI()
 
 
-@app.get("/health")
-async def health(session: Annotated[AsyncSession, Depends(get_session)]):
+@app.get("/db-check")
+async def checkDB(session: Annotated[AsyncSession, Depends(get_session)]):
     try:
         await session.execute(text("SELECT 1"))
     except SQLAlchemyError:
         raise HTTPException(503, "database unavailable") from None
+    return {"status": "ok"}
+
+
+@app.get("/health")
+async def health():
     return {"status": "ok"}
 
 
