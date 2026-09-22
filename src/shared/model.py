@@ -51,7 +51,7 @@ class GeneratedProblem(Base):
 
     # 지문
     problem_title: Mapped[str] = mapped_column(String(255))
-    problem_description: Mapped[str] = mapped_column(Text)
+    problem_content: Mapped[str] = mapped_column(Text)
     input_format: Mapped[str] = mapped_column(Text)
     output_format: Mapped[str] = mapped_column(Text)
 
@@ -158,7 +158,7 @@ class FewshotSeed(Base):
 
     # 지문
     problem_title: Mapped[str] = mapped_column(String(255))
-    problem_description: Mapped[str] = mapped_column(Text)
+    problem_content: Mapped[str] = mapped_column(Text)
     input_format: Mapped[str] = mapped_column(Text)
     output_format: Mapped[str] = mapped_column(Text)
 
