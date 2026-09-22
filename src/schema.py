@@ -1,6 +1,14 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
-from src.enum import Category, ConstraintDataType, ConstraintScope, Difficulty, Language
+from src.enum import (
+    Category,
+    ConstraintDataType,
+    ConstraintScope,
+    Difficulty,
+    ErrorCode,
+    Language,
+    SeedSource,
+)
 
 
 def to_camel(string: str) -> str:
@@ -59,9 +67,9 @@ class SolutionCode(CamelBaseModel):
 
 class Problem(CamelBaseModel):
     problem_title: str
-    problem_description: str
-    input_format: str
-    output_format: str
+    problem_description: str = Field(exclude=True)
+    input_format: str = Field(exclude=True)
+    output_format: str = Field(exclude=True)
     requested_difficulty: Difficulty
     difficulty: Difficulty
     category: Category
@@ -74,12 +82,41 @@ class Problem(CamelBaseModel):
     hint_comments: list[HintComment] = Field(default_factory=list)
     solution_codes: list[SolutionCode] = Field(default_factory=list)
 
-    def get_problem_content(self) -> str:
+    @computed_field
+    @property
+    def problem_content(self) -> str:
         return (
             f"{self.problem_description}\n\n"
             f"[입력]\n{self.input_format}\n\n"
             f"[출력]\n{self.output_format}"
         )
+
+
+class FewshotSeedCreate(CamelBaseModel):
+    source: SeedSource = SeedSource.MANUAL
+    source_ref: str | None = None
+    category: Category
+    difficulty: Difficulty
+    problem_title: str
+    problem_description: str
+    input_format: str
+    output_format: str
+    input_constraints: list[InputConstraint]
+    execution_limits: list[ExecutionLimit]
+    problem_examples: list[ProblemExample]
+
+    @field_validator("category")
+    @classmethod
+    def _no_random(cls, v: Category) -> Category:
+        if v == Category.RANDOM:
+            raise ValueError("시드 카테고리에 RANDOM은 쓸 수 없습니다")
+        return v
+
+
+class BaseResponse(CamelBaseModel):
+    success: bool = True
+    message: str | None = None
+    error_code: ErrorCode | None = None
 
 
 class EvaluationRequest(CamelBaseModel):
@@ -93,9 +130,7 @@ class EvaluationRequest(CamelBaseModel):
     natural_solution: str | None = None
 
 
-class EvaluationResponse(CamelBaseModel):
-    success: bool = True
-    message: str | None = None
+class EvaluationResponse(BaseResponse):
     score: int | None = None
     llm_feedback: str | None = None
     keywords: list[Keyword] | None = None
@@ -106,7 +141,16 @@ class ProblemRequest(CamelBaseModel):
     category: Category
 
 
-class ProblemResponse(CamelBaseModel):
-    success: bool = True
-    message: str | None = None
-    problem: Problem
+class ProblemResponse(BaseResponse):
+    problem: Problem | None = None
+
+
+class DailyProblemResponse(BaseResponse):
+    problem: Problem | None = None
+
+
+class BattleProblemResponse(BaseResponse):
+    category: Category | None = None
+    problem_title: str
+    problem_content: str
+    test_cases: list[HiddenTestCase]
