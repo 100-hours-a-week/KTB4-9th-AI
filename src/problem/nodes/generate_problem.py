@@ -1,13 +1,12 @@
 from pydantic import BaseModel, Field
 
-from src.problem.schema import Category, Difficulty
+from src.enum import Category, Difficulty, Language
 from src.problem.state import (
-    Example,
     ExecutionLimit,
     GraphState,
     InputConstraint,
-    Language,
     LLMConfig,
+    ProblemExample,
 )
 from src.shared.llm import LLMOutputParseError, call_llm_structured
 
@@ -49,10 +48,10 @@ class GeneratedProblem(BaseModel):
     category_select_reason: str
     algorithm_core: str = Field(description="입출력 형식을 뺀 핵심 풀이 한 문장")
     problem_title: str
-    problem_description: str
+    problem_content: str
     input_format: str
     output_format: str
-    problem_examples: list[Example]
+    problem_examples: list[ProblemExample]
     input_constraints: list[InputConstraint]
     execution_limits: list[ExecutionLimit]
 
@@ -83,7 +82,7 @@ def render_few_shot(problems: list[dict]) -> str:
         blocks.append(
             f"[예시 {idx}]\n"
             f"제목: {problem.get('problem_title')}\n"
-            f"지문: {problem.get('problem_description')}\n"
+            f"지문: {problem.get('problem_content')}\n"
             f"입력 형식: {problem.get('input_format')}\n"
             f"출력 형식: {problem.get('output_format')}"
         )
@@ -153,7 +152,7 @@ async def generate_problem(state: GraphState) -> dict:
         "category_select_reason": problem.category_select_reason,
         "algorithm_core": problem.algorithm_core,
         "problem_title": problem.problem_title,
-        "problem_description": problem.problem_description,
+        "problem_content": problem.problem_content,
         "input_format": problem.input_format,
         "output_format": problem.output_format,
         "problem_examples": problem.problem_examples,

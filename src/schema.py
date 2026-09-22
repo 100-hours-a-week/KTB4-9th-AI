@@ -47,7 +47,7 @@ class Keyword(CamelBaseModel):
 class ProblemExample(CamelBaseModel):
     input: str
     output: str
-    description: str
+    description: str | None = None
 
 
 class HiddenTestCase(CamelBaseModel):
@@ -96,7 +96,7 @@ class FewshotSeedCreate(CamelBaseModel):
     category: Category
     difficulty: Difficulty
     problem_title: str
-    problem_description: str
+    problem_content: str
     input_format: str
     output_format: str
     input_constraints: list[InputConstraint]

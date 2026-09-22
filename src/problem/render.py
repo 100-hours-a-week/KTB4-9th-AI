@@ -40,7 +40,7 @@ def render_problem(state: GraphState, include_category: bool = False) -> str:
 
     lines += [
         f"제목: {state.problem_title}",
-        f"지문:\n{state.problem_description}",
+        f"지문:\n{state.problem_content}",
         f"입력 형식:\n{state.input_format}",
         f"출력 형식:\n{state.output_format}",
         "제약:",

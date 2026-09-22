@@ -1,9 +1,3 @@
-"""DB 접근 계층.
-
-- 커밋하지 않는다. 트랜잭션은 get_session / session_scope가 관리한다.
-- id가 필요한 곳에서만 flush 한다.
-"""
-
 import uuid
 from collections.abc import Sequence
 from typing import Any, NamedTuple
@@ -35,7 +29,7 @@ class GeneratedProblemRepository:
         self.session = session
 
     async def add(self, problem: Problem) -> GeneratedProblem:
-        row = GeneratedProblem(**problem.model_dump())
+        row = GeneratedProblem(**problem.model_dump(mode="json"))
         self.session.add(row)
         await self.session.flush()  # id 확정 (임베딩 저장에 필요)
         return row
@@ -176,7 +170,7 @@ class FewshotSeedRepository:
         self.session = session
 
     async def add(self, seed: FewshotSeedCreate) -> FewshotSeed:
-        row = FewshotSeed(**seed.model_dump())
+        row = FewshotSeed(**seed.model_dump(mode="json"))
         self.session.add(row)
         await self.session.flush()
         return row

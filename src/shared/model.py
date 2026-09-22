@@ -151,6 +151,7 @@ class FewshotSeed(Base):
 
     # 출처
     source: Mapped[SeedSource] = mapped_column(_enum_col(SeedSource))
+    source_ref: Mapped[str | None] = mapped_column(String(255))  # 승격 시 원본 식별자
 
     # 분류
     category: Mapped[Category] = mapped_column(_enum_col(Category))

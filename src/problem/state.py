@@ -1,50 +1,22 @@
-from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from src.problem.schema import Difficulty
+from src.enum import (
+    ConstraintDataType,
+    ConstraintScope,
+    Difficulty,
+    DiscardReason,
+    Language,
+)
 
 
-class Language(StrEnum):
-    PYTHON = "python"
-    JAVA = "java"
-    JAVASCRIPT = "javascript"
-    CPP = "cpp"
-
-
-class ConstraintScope(StrEnum):
-    INPUT = "input"
-    OUTPUT = "output"
-
-
-class ConstraintDataType(StrEnum):
-    INT = "int"
-    LONG = "long"
-    DOUBLE = "double"
-    STRING = "str"
-    CHAR = "char"
-    BOOLEAN = "bool"
-
-
-class DiscardReason(StrEnum):
-    EMPTY_FIELD = "empty_field"
-    EXAMPLE_OUT_OF_RANGE = "example_out_of_range"
-    MISMATCH_TYPE = "mismatch_type"
-    CONSTRAINT_CONFLICT = "constraint_conflict"
-    MISMATCH_LABEL = "mismatch_label"
-    DUPLICATE = "duplicate"
-    MAX_ATTEMPT_EXCEEDED = "max_attempt_exceeded"
-    PROBLEM_CONTRADICTION = "problem_contradiction"
-    CONSTRAINT_CONTRADICTION = "constraint_contradiction"
-
-
-class Example(BaseModel):
+class ProblemExample(BaseModel):
     """problem_examples. 문제당 최대 3개 (display_order 1~3)"""
 
     input: str
     output: str
-    explanation: str | None = None
+    description: str | None = None
 
 
 class InputConstraint(BaseModel):
@@ -67,11 +39,11 @@ class ExecutionLimit(BaseModel):
     memory_limit_kb: int
 
 
-class TestCase(BaseModel):
+class HiddenTestCase(BaseModel):
     """test_cases. 문제당 최대 100개 (display_order 1~100)"""
 
     input: str
-    expected_output: str
+    output: str
 
 
 class HintComment(BaseModel):
@@ -119,15 +91,15 @@ class GraphState(BaseModel):
     category: str | None = None
     category_select_reason: str | None = None
     problem_title: str | None = None
-    problem_description: str | None = None
+    problem_content: str | None = None
     input_format: str | None = None
     output_format: str | None = None
-    problem_examples: list[Example] = Field(default_factory=list)
+    problem_examples: list[ProblemExample] = Field(default_factory=list)
     input_constraints: list[InputConstraint] = Field(default_factory=list)
     execution_limits: list[ExecutionLimit] = Field(default_factory=list)
 
     # ---- testcase
-    hidden_test_cases: list[TestCase] = Field(default_factory=list)
+    hidden_test_cases: list[HiddenTestCase] = Field(default_factory=list)
 
     # ---- hint
     hint_comments: list[HintComment] = Field(default_factory=list)

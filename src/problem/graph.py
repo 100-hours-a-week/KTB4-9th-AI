@@ -2,10 +2,10 @@ from collections.abc import Awaitable, Callable
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from src.problem.nodes.generate_ref_code import generate_ref_code
 
 from src.problem.nodes import stubs
 from src.problem.nodes.generate_problem import generate_problem
+from src.problem.nodes.generate_ref_code import generate_ref_code
 from src.problem.nodes.static_validate import static_validate
 from src.problem.state import GraphState
 

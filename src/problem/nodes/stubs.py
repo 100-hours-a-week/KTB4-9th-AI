@@ -5,15 +5,13 @@
 LLM을 호출하는 노드의 임시 구현은 그래프 테스트에서 계속 사용한다.
 """
 
+from src.enum import ConstraintDataType, ConstraintScope, Language
 from src.problem.state import (
-    ConstraintDataType,
-    ConstraintScope,
-    Example,
     ExecutionLimit,
     GraphState,
     InputConstraint,
-    Language,
     LLMConfig,
+    ProblemExample,
 )
 
 
@@ -27,10 +25,10 @@ async def generate_problem(state: GraphState) -> dict:
             "해시맵으로 M - x의 등장 횟수를 누적해 합이 M인 쌍의 수를 센다"
         ),
         "problem_title": "합이 M인 쌍의 개수",
-        "problem_description": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
+        "problem_content": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
         "input_format": "첫째 줄에 N과 M, 둘째 줄에 N개의 정수가 주어진다.",
         "output_format": "쌍의 개수를 출력한다.",
-        "problem_examples": [Example(input="5 6\n1 2 3 4 5", output="2")],
+        "problem_examples": [ProblemExample(input="5 6\n1 2 3 4 5", output="2")],
         "input_constraints": [
             InputConstraint(
                 target="N",

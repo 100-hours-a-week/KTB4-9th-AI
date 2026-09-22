@@ -65,12 +65,27 @@ class RunStatus(StrEnum):
 
 
 class DiscardReason(StrEnum):
-    STATIC_VALIDATION = "STATIC_VALIDATION"  # 규칙 기반 정적 검증 실패
-    DIFFICULTY_MISMATCH = "DIFFICULTY_MISMATCH"  # 요청 난이도 != 반환 난이도
-    DUPLICATE = "DUPLICATE"  # 중복 검사 탈락
-    EXAMPLE_MISMATCH = "EXAMPLE_MISMATCH"  # 정답 코드 실행 결과 != 예시 출력
-    REFERENCE_CODE_FAILED = "REFERENCE_CODE_FAILED"
-    LLM_ERROR = "LLM_ERROR"
+    """문제가 폐기된 사유. DiscardedProblem.discard_reason에 그대로 저장된다."""
+
+    # 정적 검증 (static_validate)
+    EMPTY_FIELD = "EMPTY_FIELD"  # 필수 필드 또는 언어별 실행 제한 누락
+    MISMATCH_LABEL = "MISMATCH_LABEL"  # 요청 난이도 != 생성 난이도
+    MISMATCH_TYPE = "MISMATCH_TYPE"  # 예시 출력이 선언한 자료형과 다름
+    CONSTRAINT_CONFLICT = "CONSTRAINT_CONFLICT"  # 제약끼리 모순 (min > max 등)
+    EXAMPLE_OUT_OF_RANGE = "EXAMPLE_OUT_OF_RANGE"  # 예시 값이 제약 범위를 벗어남
+
+    # 중복 검사 (check_duplicate)
+    DUPLICATE = "DUPLICATE"  # 기존 문제와 유사도가 기준 이상
+
+    # 의미 검증 (semantic_validate)
+    PROBLEM_CONTRADICTION = "PROBLEM_CONTRADICTION"  # 지문 자체가 모순
+    CONSTRAINT_CONTRADICTION = "CONSTRAINT_CONTRADICTION"  # 지문과 제약이 모순
+    EXAMPLE_MISMATCH = "EXAMPLE_MISMATCH"  # 레퍼런스 코드 실행 결과 != 예시 출력
+    REFERENCE_CODE_FAILED = "REFERENCE_CODE_FAILED"  # 레퍼런스 코드 실행 자체가 실패
+    MAX_ATTEMPT_EXCEEDED = "MAX_ATTEMPT_EXCEEDED"  # 재시도 한도 초과
+
+    # 공통
+    LLM_ERROR = "LLM_ERROR"  # LLM 호출 또는 구조화 응답 해석 실패
 
 
 class SeedSource(StrEnum):

@@ -1,3 +1,6 @@
+import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -5,6 +8,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.handler import register_exception_handlers
+from src.core.logging import setup_logging
 from src.schema import (
     BattleProblemResponse,
     DailyProblemResponse,
@@ -13,9 +18,23 @@ from src.schema import (
     ProblemRequest,
     ProblemResponse,
 )
-from src.shared.db_client import get_session
+from src.shared.db_client import close_engine, get_session
 
-app = FastAPI()
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    setup_logging()
+    logger.info("애플리케이션 시작")
+    yield
+    await close_engine()  # 커넥션 풀 정리
+    logger.info("애플리케이션 종료")
+
+
+app = FastAPI(lifespan=lifespan)
+
+register_exception_handlers(app)
 
 
 @app.get("/db-check")

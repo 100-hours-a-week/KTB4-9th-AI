@@ -4,14 +4,18 @@ from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 
+from src.core.exception import LLMOutputParseError
 from src.problem.state import LLMConfig
 from src.shared.config import get_settings
 
 FENCE_PATTERN = re.compile(r"^```[a-zA-Z]*\n(.*?)\n?```$", re.DOTALL)
 
-
-class LLMOutputParseError(Exception):
-    """모델 응답을 기대한 형식으로 해석할 수 없을 때 발생한다."""
+__all__ = [
+    "LLMOutputParseError",
+    "build_chat_model",
+    "call_llm_structured",
+    "strip_code_fence",
+]
 
 
 def strip_code_fence(text: str) -> str:

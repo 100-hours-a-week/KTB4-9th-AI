@@ -1,9 +1,9 @@
 import pytest
 
+from src.enum import Difficulty, DiscardReason
 from src.problem.graph import PARALLEL_NODES, build_graph
 from src.problem.nodes import stubs
-from src.problem.schema import Difficulty
-from src.problem.state import DiscardReason, GraphState, discard
+from src.problem.state import GraphState, discard
 
 INPUT = {"requested_difficulty": "LV2", "requested_category": "DP"}
 
