@@ -4,8 +4,9 @@ import pytest
 
 from src.enum import DiscardReason, ExecutionStatus, Language
 from src.problem.nodes import generate_testcase as module
-from src.problem.nodes import stubs
 from src.problem.nodes.generate_testcase import (
+    MAX_REPORTED_FAILURES,
+    REQUESTED_COUNT,
     HiddenTestCaseInputs,
     build_prompt,
     generate_testcase,
@@ -18,6 +19,7 @@ from src.problem.state import (
     ProblemExample,
 )
 from src.shared.code_runner import RunResult
+from tests import fake_nodes
 
 # 첫 줄의 두 수를 더해 출력하는, 실제로 도는 레퍼런스 코드
 REFERENCE_CODE = "print(sum(map(int, input().split())))"
@@ -31,7 +33,7 @@ def many_inputs(count: int = HIDDEN_TEST_CASE_COUNT) -> list[str]:
 async def make_state(**updates) -> GraphState:
     """의미 검증까지 통과한 상태를 만든다."""
     base = GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
-    state = base.model_copy(update=await stubs.generate_problem(base))
+    state = base.model_copy(update=await fake_nodes.generate_problem(base))
     return state.model_copy(update={"reference_code": REFERENCE_CODE, **updates})
 
 
@@ -91,8 +93,10 @@ async def test_prompt_carries_the_input_format_and_constraints() -> None:
 
 
 @pytest.mark.asyncio
-async def test_prompt_states_the_required_count() -> None:
-    assert str(HIDDEN_TEST_CASE_COUNT) in build_prompt(await make_state())
+async def test_prompt_asks_for_more_than_it_keeps() -> None:
+    """중복과 예시 겹침으로 줄어드는 몫이 있어 여유분을 요청한다."""
+    assert REQUESTED_COUNT > HIDDEN_TEST_CASE_COUNT
+    assert str(REQUESTED_COUNT) in build_prompt(await make_state())
 
 
 @pytest.mark.asyncio
@@ -217,15 +221,17 @@ async def test_node_discards_when_the_reference_prints_nothing(
 
 
 @pytest.mark.asyncio
-async def test_node_reports_a_few_failures_not_all_twenty(
+async def test_node_reports_only_a_few_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """모두 실패해도 폐기 사유에 전부 적지 않는다."""
     fix_structured_response(monkeypatch, many_inputs())
     fix_run_code(monkeypatch, lambda stdin: RunResult(status=ExecutionStatus.TIMED_OUT))
 
     result = await generate_testcase(await make_state())
+    remaining = HIDDEN_TEST_CASE_COUNT - MAX_REPORTED_FAILURES
 
-    assert "외 17건" in result["discard_detail"]
+    assert f"외 {remaining}건" in result["discard_detail"]
 
 
 def test_summarize_failures_keeps_the_message_short() -> None:
@@ -256,6 +262,25 @@ async def test_node_discards_without_a_python_execution_limit() -> None:
 
     assert result["is_discarded"] is True
     assert result["discard_reason"] == DiscardReason.EMPTY_FIELD
+
+
+@pytest.mark.asyncio
+async def test_margin_absorbs_a_collision_with_a_public_example(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """공개 예시와 겹친 입력 하나 때문에 문제가 날아가면 안 된다.
+
+    공개 예시는 프롬프트에 그대로 들어가므로 모델이 거기서 값을 따올 수 있다.
+    """
+    state = await make_state()
+    collided = [state.problem_examples[0].input, *many_inputs(REQUESTED_COUNT - 1)]
+    fix_structured_response(monkeypatch, collided)
+    fix_run_code(monkeypatch, lambda stdin: succeeded("1"))
+
+    result = await generate_testcase(state)
+
+    assert "is_discarded" not in result
+    assert len(result["hidden_test_cases"]) == HIDDEN_TEST_CASE_COUNT
 
 
 @pytest.mark.asyncio

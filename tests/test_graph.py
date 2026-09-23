@@ -2,24 +2,16 @@ import pytest
 
 from src.enum import Difficulty, DiscardReason
 from src.problem.graph import PARALLEL_NODES, build_graph
-from src.problem.nodes import stubs
 from src.problem.state import (
     GraphState,
     discard,
     keep_discard_flag,
     keep_first_discard,
 )
+from tests import fake_nodes
+from tests.fake_nodes import OFFLINE_NODES
 
 INPUT = {"requested_difficulty": "LV2", "requested_category": "DP"}
-
-# 그래프 테스트는 실제 LLM을 호출하지 않도록 LLM 노드를 임시 구현으로 고정한다.
-OFFLINE_NODES = {
-    "generate_problem": stubs.generate_problem,
-    "generate_ref_code": stubs.generate_ref_code,
-    "generate_testcase": stubs.generate_testcase,
-    "generate_solution_code": stubs.generate_solution_code,
-    "generate_nl_keyword": stubs.generate_nl_keyword,
-}
 
 
 async def run(overrides: dict | None = None) -> GraphState:
@@ -46,7 +38,7 @@ async def test_정상_흐름이면_병렬_노드까지_실행된다():
 @pytest.mark.asyncio
 async def test_정적검증_실패면_폐기로_끝나고_병렬_노드는_안_돈다():
     async def wrong_difficulty(state: GraphState) -> dict:
-        result = await stubs.generate_problem(state)
+        result = await fake_nodes.generate_problem(state)
         result["difficulty"] = Difficulty.LV5
         return result
 

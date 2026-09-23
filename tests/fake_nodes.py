@@ -1,8 +1,10 @@
-"""
-아직 구현되지 않은 노드의 임시 구현.
+"""그래프 노드의 테스트 대역.
 
-실제 노드가 완성되면 graph.py의 DEFAULT_NODES에서 해당 항목을 교체한다.
-LLM을 호출하는 노드의 임시 구현은 그래프 테스트에서 계속 사용한다.
+프로덕션 코드는 이 모듈을 쓰지 않는다. 그래프를 돌리는 테스트가 바깥을
+건드리지 않게 하고(LLM 호출, DB 쓰기), 검증을 통과한 상태를 만드는 데 쓴다.
+
+노드를 실 구현으로 바꿀 때마다 OFFLINE_NODES에 한 줄을 추가한다.
+빠뜨리면 테스트가 실제 API를 때리거나 개발용 DB에 쓰레기 행을 쌓는다.
 """
 
 from src.enum import ConstraintDataType, ConstraintScope, Language
@@ -34,8 +36,8 @@ async def generate_problem(state: GraphState) -> dict:
                 target="N",
                 scope=ConstraintScope.INPUT,
                 data_type=ConstraintDataType.INT,
-                min_value="2",
-                max_value="10^5",
+                min_value=2,
+                max_value=100000,
                 data_count=1,
             ),
             InputConstraint(
@@ -79,10 +81,43 @@ async def generate_nl_keyword(state: GraphState) -> dict:
 
 
 async def finalize(state: GraphState) -> dict:
-    """확정 후 색인·버퍼 저장 자리. 현재는 아무것도 하지 않는다."""
+    """저장하지 않는다. 테스트가 개발용 DB에 쓰지 않게 막는다."""
     return {}
 
 
 async def discard_problem(state: GraphState) -> dict:
-    """폐기 로그 저장 자리. 현재는 아무것도 하지 않는다."""
+    """폐기 로그를 남기지 않는다. 테스트가 개발용 DB에 쓰지 않게 막는다."""
     return {}
+
+
+OFFLINE_NODES = {
+    # LLM 호출
+    "generate_problem": generate_problem,
+    "generate_ref_code": generate_ref_code,
+    "semantic_validate": semantic_validate,
+    "generate_testcase": generate_testcase,
+    "generate_solution_code": generate_solution_code,
+    "generate_nl_keyword": generate_nl_keyword,
+    # 임베딩 호출 + DB 조회
+    "check_duplicate": check_duplicate,
+    # DB 쓰기
+    "finalize": finalize,
+    "discard_problem": discard_problem,
+}
+
+
+def offline_except(*under_test: str, **overrides) -> dict:
+    """
+    검사할 노드만 실 구현으로 남기고 나머지를 임시 구현으로 고정한다.
+
+    Parameters:
+        under_test (str): 실 구현으로 돌릴 노드 이름. build_graph의 기본값을 쓴다
+        overrides: 직접 지정할 노드
+
+    Returns:
+        dict: build_graph에 넘길 overrides
+    """
+    kept = {
+        name: node for name, node in OFFLINE_NODES.items() if name not in under_test
+    }
+    return kept | overrides

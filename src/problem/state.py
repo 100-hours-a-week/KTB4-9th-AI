@@ -1,3 +1,4 @@
+import uuid
 from typing import Annotated
 
 from pydantic import BaseModel, Field
@@ -10,7 +11,7 @@ from src.enum import (
     Language,
 )
 
-HIDDEN_TEST_CASE_COUNT = 20
+HIDDEN_TEST_CASE_COUNT = 7  # 문제당 보관할 비공개 테스트 케이스 수
 
 
 class ProblemExample(BaseModel):
@@ -27,8 +28,9 @@ class InputConstraint(BaseModel):
     target: str
     scope: ConstraintScope
     data_type: ConstraintDataType
-    min_value: str | None = None
-    max_value: str | None = None
+    # data_type이 숫자형일 때만 값이 있다. 문자열·문자·불이면 비워 둔다.
+    min_value: float | None = None
+    max_value: float | None = None
     data_count: int | None = None
     special_conditions: list[str] = Field(default_factory=list)
 
@@ -42,7 +44,7 @@ class ExecutionLimit(BaseModel):
 
 
 class HiddenTestCase(BaseModel):
-    """test_cases. 문제당 HIDDEN_TEST_CASE_COUNT개 (display_order 1~20)"""
+    """test_cases. 문제당 HIDDEN_TEST_CASE_COUNT개 (display_order 1부터)"""
 
     input: str
     output: str
@@ -64,6 +66,13 @@ class LLMConfig(BaseModel):
     prompt_version: str | None = None
     temperature: float | None = None
     top_k: int | None = 3
+
+
+def find_limit(
+    limits: list[ExecutionLimit], language: Language
+) -> ExecutionLimit | None:
+    """언어에 해당하는 실행 제한을 찾는다. 없으면 None."""
+    return next((limit for limit in limits if limit.language is language), None)
 
 
 def keep_discard_flag(left: bool, right: bool) -> bool:
@@ -133,6 +142,8 @@ class GraphState(BaseModel):
     # ---- 중복 검사
     is_duplicated: bool = False
     algorithm_core: str | None = None
+    # check_duplicate가 만들어 finalize가 색인에 다시 쓴다. 두 번 부르지 않는다.
+    algorithm_core_embedding: list[float] | None = None
 
     # ---- 검증용 예시 코드
     reference_code: str | None = None
@@ -147,6 +158,11 @@ class GraphState(BaseModel):
     is_discarded: Annotated[bool, keep_discard_flag] = False
     discard_reason: Annotated[DiscardReason | None, keep_first_discard] = None
     discard_detail: Annotated[str | None, keep_first_discard] = None
+    # 어느 노드에서 걸렸는지. build_graph가 노드마다 자동으로 채운다.
+    discard_stage: Annotated[str | None, keep_first_discard] = None
+
+    # ---- 저장 결과
+    problem_id: uuid.UUID | None = None  # finalize가 채운다
 
     # ---- 분석용
     node_models: Annotated[dict[str, LLMConfig], merge_node_models] = Field(

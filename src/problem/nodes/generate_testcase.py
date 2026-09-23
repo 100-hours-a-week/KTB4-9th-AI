@@ -14,6 +14,7 @@ from src.problem.state import (
     LLMConfig,
     ProblemExample,
     discard,
+    find_limit,
 )
 from src.shared.code_runner import RunResult, run_code
 from src.shared.llm import call_llm_structured
@@ -21,7 +22,12 @@ from src.shared.llm import call_llm_structured
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "gemini-3.7-flash"
-PROMPT_VERSION = "generate_testcase/v1"
+PROMPT_VERSION = "generate_testcase/v2"
+
+# 중복과 공개 예시 겹침으로 줄어드는 몫을 감안해 넉넉히 요청한다.
+# 정확히 필요한 수만 요청하면 하나만 겹쳐도 문제 전체가 폐기된다.
+REQUEST_MARGIN = 3
+REQUESTED_COUNT = HIDDEN_TEST_CASE_COUNT + REQUEST_MARGIN
 
 GENERATE_TESTCASE_PROMPT = """당신은 코딩 테스트 문제의 검증자다.
 
@@ -67,7 +73,7 @@ def build_prompt(state: GraphState) -> str:
     """
     return GENERATE_TESTCASE_PROMPT.format(
         problem=render_problem(state, include_category=False),
-        count=HIDDEN_TEST_CASE_COUNT,
+        count=REQUESTED_COUNT,
     )
 
 
@@ -133,12 +139,6 @@ async def run_reference(
     )
 
 
-def find_reference_limit(limits: list[ExecutionLimit]) -> ExecutionLimit | None:
-    return next(
-        (limit for limit in limits if limit.language is REFERENCE_LANGUAGE), None
-    )
-
-
 async def generate_testcase(state: GraphState) -> dict:
     """
     비공개 테스트 케이스를 만든다.
@@ -162,7 +162,7 @@ async def generate_testcase(state: GraphState) -> dict:
     if not state.reference_code:
         return discard(DiscardReason.EMPTY_FIELD, "검증용 코드가 비었음")
 
-    limit = find_reference_limit(state.execution_limits)
+    limit = find_limit(state.execution_limits, REFERENCE_LANGUAGE)
     if limit is None:
         return discard(
             DiscardReason.EMPTY_FIELD,

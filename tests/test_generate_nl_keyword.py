@@ -2,7 +2,6 @@ import pytest
 
 from src.enum import DiscardReason
 from src.problem.nodes import generate_nl_keyword as module
-from src.problem.nodes import stubs
 from src.problem.nodes.generate_nl_keyword import (
     KEYWORD_MAX,
     KEYWORD_MIN,
@@ -13,12 +12,13 @@ from src.problem.nodes.generate_nl_keyword import (
 )
 from src.problem.state import GraphState
 from src.shared.llm import LLMOutputParseError
+from tests import fake_nodes
 
 
 async def make_state() -> GraphState:
     """정적 검증을 통과한 문제가 담긴 상태를 만든다."""
     base = GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
-    return base.model_copy(update=await stubs.generate_problem(base))
+    return base.model_copy(update=await fake_nodes.generate_problem(base))
 
 
 def fix_structured_response(

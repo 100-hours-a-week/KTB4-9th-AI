@@ -1,6 +1,24 @@
 from src.problem.state import GraphState, InputConstraint
 
 
+def format_number(value: float | None) -> str:
+    """
+    제약 값을 사람이 읽는 모양으로 만든다.
+
+    정수로 떨어지면 소수점을 뗀다(100000.0 -> "100000").
+    값이 없으면 빈 문자열이다.
+
+    Parameters:
+        value (float | None): 제약의 최솟값 또는 최댓값
+
+    Returns:
+        str: 표시할 문자열
+    """
+    if value is None:
+        return ""
+    return str(int(value)) if value.is_integer() else str(value)
+
+
 def render_constraint(constraint: InputConstraint) -> str:
     """
     제약 하나를 프롬프트용 한 줄로 만든다.
@@ -13,7 +31,9 @@ def render_constraint(constraint: InputConstraint) -> str:
     """
     line = f"- {constraint.target} ({constraint.scope}, {constraint.data_type})"
     if constraint.min_value is not None or constraint.max_value is not None:
-        line += f": {constraint.min_value} ~ {constraint.max_value}"
+        low = format_number(constraint.min_value)
+        high = format_number(constraint.max_value)
+        line += f": {low} ~ {high}"
     if constraint.data_count is not None:
         line += f", 개수 {constraint.data_count}"
     if constraint.special_conditions:

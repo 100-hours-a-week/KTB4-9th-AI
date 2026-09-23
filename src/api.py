@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -8,8 +9,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exception import ProblemGenerationError
 from src.core.handler import register_exception_handlers
 from src.core.logging import setup_logging
+from src.problem.graph import build_graph
+from src.problem.nodes.finalize import build_problem
+from src.problem.state import GraphState
 from src.schema import (
     BattleProblemResponse,
     DailyProblemResponse,
@@ -37,6 +42,12 @@ app = FastAPI(lifespan=lifespan)
 register_exception_handlers(app)
 
 
+@lru_cache(maxsize=1)
+def get_graph():
+    """그래프는 한 번만 조립한다. 요청마다 다시 만들 이유가 없다."""
+    return build_graph()
+
+
 @app.get("/db-check")
 async def checkDB(session: Annotated[AsyncSession, Depends(get_session)]):
     try:
@@ -52,8 +63,22 @@ async def health():
 
 
 @app.post("/api/llm/problem")
-async def makeProble(request: ProblemRequest) -> ProblemResponse:
-    return {"status": "ok"}
+async def make_problem(request: ProblemRequest) -> ProblemResponse:
+    """문제 하나를 생성한다. 검증에서 걸리면 폐기되고 502로 응답한다."""
+    state = GraphState(
+        requested_difficulty=request.difficulty,
+        requested_category=request.category,
+    )
+    result = GraphState(**await get_graph().ainvoke(state))
+
+    if result.is_discarded:
+        # 자세한 사유는 discard_problem이 로그와 DB에 남긴다
+        raise ProblemGenerationError(
+            f"문제를 만들지 못했습니다 "
+            f"({result.discard_stage}: {result.discard_reason})"
+        )
+
+    return ProblemResponse(problem=build_problem(result))
 
 
 @app.post("/api/llm/problem/daily")

@@ -61,7 +61,7 @@ class GeneratedProblem(Base):
     problem_examples: Mapped[JsonList] = mapped_column(JSONB)  # list[ProblemExample]
     hidden_test_cases: Mapped[JsonList] = mapped_column(
         JSONB
-    )  # list[HiddenTestCase], 20개
+    )  # list[HiddenTestCase], 개수는 HIDDEN_TEST_CASE_COUNT
     solution_codes: Mapped[JsonList] = mapped_column(JSONB)  # list[SolutionCode]
     hint_comments: Mapped[JsonList] = mapped_column(JSONB)  # list[HintComment]
     solution_keywords: Mapped[list[str]] = mapped_column(JSONB)  # 채점 키워드
@@ -140,8 +140,9 @@ class ProblemEmbedding(Base):
 class FewshotSeed(Base):
     """프롬프트에 끼워 넣을 예시 문제.
 
-    직접 작성, 외부 문제, 생성 결과 승격 세 경로로 들어온다.
-    승격은 복사이므로 원본 버퍼 행이 지워져도 시드는 남는다.
+    사람이 직접 넣는다. 자동으로 채워지는 경로는 없다.
+    생성 결과에서 골라 넣는 경우(source=PROMOTED)도 수동이며, 복사이므로
+    원본 버퍼 행이 지워져도 시드는 남는다.
     생성 단계 프롬프트용이라 지문·제약·예시까지만 필수, 코드는 선택.
     """
 
