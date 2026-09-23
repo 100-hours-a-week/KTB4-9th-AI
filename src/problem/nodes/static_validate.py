@@ -1,6 +1,7 @@
 import re
 
 from src.enum import ConstraintDataType, ConstraintScope, DiscardReason, Language
+from src.problem.render import format_number
 from src.problem.state import GraphState, discard
 
 NUMERIC_TYPES = {
@@ -11,33 +12,13 @@ NUMERIC_TYPES = {
 INTEGER_TYPES = {ConstraintDataType.INT, ConstraintDataType.LONG}
 
 
-def to_number(text: str | None) -> float | None:
-    """
-    제약 값 문자열을 숫자로 변환한다.
-
-    "100000", "-200000", "1e5", "10^5", "2*10^5", "100,000" 형식을 허용한다.
-
-    Parameters:
-        text (str | None): 제약 값 문자열
-
-    Returns:
-        float | None: 변환한 숫자. 변환할 수 없으면 None
-    """
-    if text is None:
-        return None
-    cleaned = text.replace(",", "").replace(" ", "")
-    sign = -1 if cleaned.startswith("-") else 1
-    body = cleaned.lstrip("-")
-
-    power = re.fullmatch(r"(?:(\d+(?:\.\d+)?)\*)?(\d+)\^(\d+)", body)
-    if power:
-        coef = float(power.group(1)) if power.group(1) else 1.0
-        return sign * coef * float(power.group(2)) ** int(power.group(3))
-
+def is_number(token: str) -> bool:
+    """출력 토큰 하나가 실수로 읽히는지 본다."""
     try:
-        return float(cleaned)
+        float(token)
     except ValueError:
-        return None
+        return False
+    return True
 
 
 def matches_type(token: str, data_type: ConstraintDataType) -> bool:
@@ -54,7 +35,7 @@ def matches_type(token: str, data_type: ConstraintDataType) -> bool:
     if data_type in INTEGER_TYPES:
         return re.fullmatch(r"-?\d+", token) is not None
     if data_type == ConstraintDataType.DOUBLE:
-        return to_number(token) is not None
+        return is_number(token)
     if data_type == ConstraintDataType.CHAR:
         return len(token) == 1
     if data_type == ConstraintDataType.BOOLEAN:
@@ -123,16 +104,16 @@ async def static_validate(state: GraphState) -> dict:
     for constraint in state.input_constraints:
         if constraint.data_type not in NUMERIC_TYPES:
             continue
-        low = to_number(constraint.min_value)
-        high = to_number(constraint.max_value)
+        low = constraint.min_value
+        high = constraint.max_value
         if low is None or high is None:
             continue
 
         if low > high:
             return discard(
                 DiscardReason.CONSTRAINT_CONFLICT,
-                f"{constraint.target}: 최솟값 {constraint.min_value}이(가) "
-                f"최댓값 {constraint.max_value}보다 큼",
+                f"{constraint.target}: 최솟값 {format_number(low)}이(가) "
+                f"최댓값 {format_number(high)}보다 큼",
             )
 
         is_distinct = "서로 다른" in " ".join(constraint.special_conditions)

@@ -29,7 +29,8 @@ GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 - 예시의 output은 input을 실제로 풀었을 때 나오는 정확한 값이어야 한다.
 - input_constraints에는 입력 항목(scope: input)과
   출력(scope: output, target: output)을 모두 적는다.
-- min_value, max_value는 숫자 문자열로 적는다. 문자열 자료형이면 비워 둔다.
+- data_type이 숫자형(int, long, double)일 때만 min_value, max_value를 숫자로 적는다.
+- 숫자형이 아니면(str, char, bool) min_value, max_value를 비워 둔다.
 - 값들이 서로 달라야 하면 special_conditions에 "서로 다른 값"이라고 적는다.
 - execution_limits는 {languages} 네 언어를 모두 적는다.
 - category_select_reason에는 이 카테고리로 판단한 근거를 한 문장으로 적는다.

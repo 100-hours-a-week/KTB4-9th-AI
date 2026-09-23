@@ -102,8 +102,10 @@ class DiscardReason(StrEnum):
 
 
 class SeedSource(StrEnum):
-    MANUAL = "MANUAL"  # 직접 작성
-    PROMOTED = "PROMOTED"  # 생성 결과에서 승격
+    """시드의 출처. 어느 쪽이든 사람이 직접 넣는다."""
+
+    MANUAL = "MANUAL"  # 직접 작성했거나 외부에서 가져온 문제
+    PROMOTED = "PROMOTED"  # 생성 결과 중 쓸 만한 것을 골라 넣음
 
 
 class ErrorCode(StrEnum):

@@ -3,12 +3,15 @@ from collections.abc import Awaitable, Callable
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from src.problem.nodes import stubs
+from src.problem.nodes.check_duplicate import check_duplicate
+from src.problem.nodes.discard_problem import discard_problem
+from src.problem.nodes.finalize import finalize
 from src.problem.nodes.generate_nl_keyword import generate_nl_keyword
 from src.problem.nodes.generate_problem import generate_problem
 from src.problem.nodes.generate_ref_code import generate_ref_code
 from src.problem.nodes.generate_solution_code import generate_solution_code
 from src.problem.nodes.generate_testcase import generate_testcase
+from src.problem.nodes.semantic_validate import semantic_validate
 from src.problem.nodes.static_validate import static_validate
 from src.problem.state import GraphState
 
@@ -21,6 +24,22 @@ PARALLEL_NODES = [
 ]
 
 
+def tag_discard_stage(name: str, node: NodeFn) -> NodeFn:
+    """폐기 결과에 그 노드의 이름을 붙인다.
+
+    노드마다 자기 이름을 넘기게 하면 빠뜨리기 쉽고, DiscardedProblem.stage는
+    비워 둘 수 없는 컬럼이다. 배선하는 쪽에서 채우면 잊을 일이 없다.
+    """
+
+    async def tagged(state: GraphState) -> dict:
+        result = await node(state)
+        if result.get("is_discarded") and not result.get("discard_stage"):
+            return result | {"discard_stage": name}
+        return result
+
+    return tagged
+
+
 async def collect_parallel(state: GraphState) -> dict:
     """병렬 생성 노드 셋의 합류 지점. 상태를 바꾸지 않는다.
 
@@ -31,19 +50,19 @@ async def collect_parallel(state: GraphState) -> dict:
     return {}
 
 
-# 노드 이름 → 실행 함수. 실제 노드가 완성되면 stubs 항목을 교체한다.
+# 노드 이름 → 실행 함수. 테스트는 overrides로 일부를 바꿔 끼운다.
 DEFAULT_NODES: dict[str, NodeFn] = {
     "generate_problem": generate_problem,
     "static_validate": static_validate,
-    "check_duplicate": stubs.check_duplicate,
+    "check_duplicate": check_duplicate,
     "generate_ref_code": generate_ref_code,
-    "semantic_validate": stubs.semantic_validate,
+    "semantic_validate": semantic_validate,
     "generate_testcase": generate_testcase,
     "generate_solution_code": generate_solution_code,
     "generate_nl_keyword": generate_nl_keyword,
     "collect_parallel": collect_parallel,
-    "finalize": stubs.finalize,
-    "discard_problem": stubs.discard_problem,
+    "finalize": finalize,
+    "discard_problem": discard_problem,
 }
 
 
@@ -92,7 +111,7 @@ def build_graph(overrides: dict[str, NodeFn] | None = None) -> CompiledStateGrap
 
     builder = StateGraph(GraphState)
     for name, fn in nodes.items():
-        builder.add_node(name, fn)
+        builder.add_node(name, tag_discard_stage(name, fn))
 
     builder.add_edge(START, "generate_problem")
     builder.add_edge("generate_problem", "static_validate")

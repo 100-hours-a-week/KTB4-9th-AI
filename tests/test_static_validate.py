@@ -34,8 +34,8 @@ def make_state(**overrides) -> GraphState:
                 target="N",
                 scope=ConstraintScope.INPUT,
                 data_type=ConstraintDataType.INT,
-                min_value="2",
-                max_value="10^5",
+                min_value=2,
+                max_value=100000,
                 data_count=1,
             ),
             InputConstraint(
@@ -96,8 +96,8 @@ async def test_최솟값이_최댓값보다_크면_폐기한다():
             target="N",
             scope=ConstraintScope.INPUT,
             data_type=ConstraintDataType.INT,
-            min_value="100",
-            max_value="10",
+            min_value=100,
+            max_value=10,
         )
     ]
     result = await static_validate(make_state(input_constraints=constraints))
@@ -111,8 +111,8 @@ async def test_서로_다른_값을_범위보다_많이_요구하면_폐기한�
             target="arr",
             scope=ConstraintScope.INPUT,
             data_type=ConstraintDataType.INT,
-            min_value="1",
-            max_value="10",
+            min_value=1,
+            max_value=10,
             data_count=20,
             special_conditions=["서로 다른 수"],
         )

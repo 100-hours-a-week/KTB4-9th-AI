@@ -2,7 +2,6 @@ import pytest
 
 from src.enum import DiscardReason, Language
 from src.problem.nodes import generate_solution_code as module
-from src.problem.nodes import stubs
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.nodes.generate_solution_code import (
     LanguageSolution,
@@ -14,6 +13,7 @@ from src.problem.nodes.generate_solution_code import (
 )
 from src.problem.state import GraphState, LLMConfig
 from src.shared.llm import LLMOutputParseError
+from tests import fake_nodes
 
 REFERENCE_CODE = "import sys\nprint(2)"
 
@@ -21,7 +21,7 @@ REFERENCE_CODE = "import sys\nprint(2)"
 async def make_state(**updates) -> GraphState:
     """의미 검증까지 통과한 상태를 만든다."""
     base = GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
-    state = base.model_copy(update=await stubs.generate_problem(base))
+    state = base.model_copy(update=await fake_nodes.generate_problem(base))
     return state.model_copy(
         update={
             "reference_code": REFERENCE_CODE,

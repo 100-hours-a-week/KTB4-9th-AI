@@ -50,7 +50,7 @@ STARTUP_MARGIN_MS = 500
 # stdout, stderr 각각의 상한
 MAX_OUTPUT_BYTES = 64 * 1024
 
-# 동시에 띄울 프로세스 수. 테스트 케이스 20개를 한꺼번에 돌리면
+# 동시에 띄울 프로세스 수. 테스트 케이스를 한꺼번에 돌리면
 # 각 프로세스가 메모리 상한까지 쓸 수 있어 컨테이너가 죽는다.
 MAX_CONCURRENT_RUNS = 4
 
