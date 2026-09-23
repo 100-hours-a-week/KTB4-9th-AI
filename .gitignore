@@ -5,6 +5,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+*.pyo
+.Python
 
 # ===== 가상환경 (uv) =====
 .venv/
@@ -20,6 +22,7 @@ dist/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.ipynb_checkpoints/
 
 # ===== 로컬 데이터 =====
 *.db

@@ -15,7 +15,8 @@ dependencies = [
     "psycopg[binary]>=3.3.5",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
-    "sqlalchemy>=2.0.54",
+    "python-dotenv>=1.2.3",
+    "sqlalchemy[asyncio]>=2.0.54",
 ]
 
 [dependency-groups]
@@ -25,12 +26,15 @@ dev = [
     "ruff>=0.16.8",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
 [tool.ruff]
 target-version = "py314"
 line-length = 88
 indent-width = 4
- 
-# extend-exclude = ["chroma_data"]
+
+extend-exclude = ["alembic/versions"]
  
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
