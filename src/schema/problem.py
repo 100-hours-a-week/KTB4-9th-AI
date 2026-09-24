@@ -1,26 +1,14 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
-from src.enum import (
+from src.core.enums import (
     Category,
     ConstraintDataType,
     ConstraintScope,
     Difficulty,
-    ErrorCode,
     Language,
     SeedSource,
 )
-
-
-def to_camel(string: str) -> str:
-    parts = string.split("_")
-    return parts[0] + "".join(word.capitalize() for word in parts[1:])
-
-
-class CamelBaseModel(BaseModel):
-    model_config = ConfigDict(
-        alias_generator=to_camel,
-        populate_by_name=True,
-    )
+from src.schema.base import BaseResponse, CamelBaseModel
 
 
 class InputConstraint(CamelBaseModel):
@@ -37,11 +25,6 @@ class ExecutionLimit(CamelBaseModel):
     language: Language
     time_limit_ms: int
     memory_limit_kb: int
-
-
-class Keyword(CamelBaseModel):
-    keyword: str
-    is_included: bool
 
 
 class ProblemExample(CamelBaseModel):
@@ -109,29 +92,6 @@ class FewshotSeedCreate(CamelBaseModel):
         if v == Category.RANDOM:
             raise ValueError("시드 카테고리에 RANDOM은 쓸 수 없습니다")
         return v
-
-
-class BaseResponse(CamelBaseModel):
-    success: bool = True
-    message: str | None = None
-    error_code: ErrorCode | None = None
-
-
-class EvaluationRequest(CamelBaseModel):
-    problem_title: str | None = None
-    problem_content: str | None = None
-    category: Category | None = None  # 추후 ENUM으로 교체
-    category_select_reason: str | None = None
-    solution_keywords: list[str] | None = None
-    input_constraints: list[InputConstraint] | None = None
-    execution_limits: list[ExecutionLimit] | None = None
-    natural_solution: str | None = None
-
-
-class EvaluationResponse(BaseResponse):
-    score: int | None = None
-    llm_feedback: str | None = None
-    keywords: list[Keyword] | None = None
 
 
 class ProblemRequest(CamelBaseModel):

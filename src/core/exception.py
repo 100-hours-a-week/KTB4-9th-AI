@@ -1,4 +1,4 @@
-from src.enum import ErrorCode
+from src.core.enums import ErrorCode
 
 
 class CosmosError(Exception):
@@ -39,3 +39,7 @@ class LLMOutputParseError(CosmosError):
 
     code = ErrorCode.PROBLEM_GENERATION_FAILED
     status = 502
+
+
+class ProblemSaveError(CosmosError):
+    """확정된 문제를 저장할 수 없다."""

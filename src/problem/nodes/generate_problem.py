@@ -1,14 +1,14 @@
 from pydantic import BaseModel, Field
 
-from src.enum import Category, Difficulty, Language
+from src.client.llm import LLMConfig, call_llm_structured
+from src.core.enums import Category, Difficulty, Language
+from src.core.exception import LLMOutputParseError
 from src.problem.state import (
     ExecutionLimit,
     GraphState,
     InputConstraint,
-    LLMConfig,
     ProblemExample,
 )
-from src.shared.llm import LLMOutputParseError, call_llm_structured
 
 MODEL_NAME = "gemini-3.5-flash-lite"
 PROMPT_VERSION = "generate_problem/v3"

@@ -1,7 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from src.enum import ConstraintDataType, Difficulty, Language
+from src.core.enums import ConstraintDataType, Difficulty, Language
+from src.core.exception import LLMOutputParseError
 from src.problem.nodes import generate_problem as module
 from src.problem.nodes.generate_problem import (
     GeneratedProblem,
@@ -9,7 +10,6 @@ from src.problem.nodes.generate_problem import (
     generate_problem,
 )
 from src.problem.state import GraphState, ProblemExample
-from src.shared.llm import LLMOutputParseError
 
 VALID_PROBLEM = {
     "difficulty": "LV2",

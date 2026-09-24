@@ -1,6 +1,6 @@
 import pytest
 
-from src.enum import (
+from src.core.enums import (
     ConstraintDataType,
     ConstraintScope,
     Difficulty,

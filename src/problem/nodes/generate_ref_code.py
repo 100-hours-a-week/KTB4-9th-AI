@@ -1,9 +1,10 @@
 from pydantic import BaseModel, Field
 
-from src.enum import Language
+from src.client.llm import LLMConfig, call_llm_structured, strip_code_fence
+from src.core.enums import Language
+from src.core.exception import LLMOutputParseError
 from src.problem.render import render_problem
-from src.problem.state import GraphState, LLMConfig
-from src.shared.llm import LLMOutputParseError, call_llm_structured, strip_code_fence
+from src.problem.state import GraphState
 
 MODEL_NAME = "gemini-3.7-flash"
 PROMPT_VERSION = "generate_ref_code/v2"

@@ -2,9 +2,9 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from src.api import app
+from src.core.enums import ErrorCode
 from src.core.exception import CosmosError, ProblemGenerationError
-from src.enum import ErrorCode
+from src.main import app
 
 
 @app.get("/_test/cosmos-error")

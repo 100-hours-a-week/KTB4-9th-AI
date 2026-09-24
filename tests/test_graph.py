@@ -1,6 +1,6 @@
 import pytest
 
-from src.enum import Difficulty, DiscardReason
+from src.core.enums import Difficulty, DiscardReason
 from src.problem.graph import PARALLEL_NODES, build_graph
 from src.problem.state import (
     GraphState,

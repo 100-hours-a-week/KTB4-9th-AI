@@ -32,6 +32,8 @@ class Settings(BaseSettings):
 
     backend_url: str = "http://localhost:8080"
 
+    judge0_url: str = "http://localhost:2358"
+
     log_level: str = "INFO"
 
 

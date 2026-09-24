@@ -8,9 +8,8 @@ from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from src.enum import Category, Difficulty, DiscardReason, SeedSource
-
-EMBEDDING_DIM = 768
+from src.core.constants import EMBEDDING_DIM
+from src.core.enums import Category, Difficulty, DiscardReason, SeedSource
 
 # JSONB 컬럼 규칙: Pydantic 스키마의 model_dump(mode="json") 결과(snake_case)그대로 저장
 JsonList = list[dict[str, Any]]

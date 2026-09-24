@@ -1,6 +1,6 @@
 from logging.config import dictConfig
 
-from src.shared.config import get_settings
+from src.core.config import get_settings
 
 
 def setup_logging() -> None:
