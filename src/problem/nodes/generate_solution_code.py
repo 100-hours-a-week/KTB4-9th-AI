@@ -3,6 +3,7 @@ import logging
 
 from pydantic import BaseModel, Field
 
+from src.client.llm import LLMConfig, call_llm_structured, strip_code_fence
 from src.core.enums import DiscardReason, Language
 from src.core.exception import LLMOutputParseError
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
@@ -11,11 +12,9 @@ from src.problem.state import (
     ExecutionLimit,
     GraphState,
     HintComment,
-    LLMConfig,
     SolutionCode,
     discard,
 )
-from src.shared.llm import call_llm_structured, strip_code_fence
 
 logger = logging.getLogger(__name__)
 

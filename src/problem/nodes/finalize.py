@@ -7,6 +7,7 @@
 import logging
 import uuid
 
+from src.client.embedding import EMBEDDING_MODEL
 from src.core.exception import ProblemSaveError
 from src.db.repository import (
     GeneratedProblemRepository,
@@ -15,7 +16,6 @@ from src.db.repository import (
 from src.db.session import session_scope
 from src.problem.state import GraphState
 from src.schema.problem import Problem
-from src.shared.embedding import EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 

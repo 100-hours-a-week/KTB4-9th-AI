@@ -3,6 +3,8 @@ import logging
 
 from pydantic import BaseModel, Field
 
+from src.client.code_runner import RunResult, run_code
+from src.client.llm import LLMConfig, call_llm_structured
 from src.core.enums import DiscardReason
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.render import render_problem
@@ -11,13 +13,10 @@ from src.problem.state import (
     ExecutionLimit,
     GraphState,
     HiddenTestCase,
-    LLMConfig,
     ProblemExample,
     discard,
     find_limit,
 )
-from src.shared.code_runner import RunResult, run_code
-from src.shared.llm import call_llm_structured
 
 logger = logging.getLogger(__name__)
 

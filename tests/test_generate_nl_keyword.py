@@ -1,6 +1,7 @@
 import pytest
 
 from src.core.enums import DiscardReason
+from src.core.exception import LLMOutputParseError
 from src.problem.nodes import generate_nl_keyword as module
 from src.problem.nodes.generate_nl_keyword import (
     KEYWORD_MAX,
@@ -11,7 +12,6 @@ from src.problem.nodes.generate_nl_keyword import (
     normalize_keywords,
 )
 from src.problem.state import GraphState
-from src.shared.llm import LLMOutputParseError
 from tests import fake_nodes
 
 

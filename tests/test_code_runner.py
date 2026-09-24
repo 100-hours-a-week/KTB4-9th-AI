@@ -3,10 +3,8 @@ import time
 
 import pytest
 
-from src.core.enums import ExecutionStatus, Language
-from src.problem.state import ExecutionLimit
-from src.shared import code_runner
-from src.shared.code_runner import (
+from src.client import code_runner
+from src.client.code_runner import (
     MAX_CONCURRENT_RUNS,
     MAX_OUTPUT_BYTES,
     MEMORY_LIMIT_SUPPORTED,
@@ -14,6 +12,8 @@ from src.shared.code_runner import (
     RunResult,
     run_code,
 )
+from src.core.enums import ExecutionStatus, Language
+from src.problem.state import ExecutionLimit
 
 
 def limit(time_limit_ms: int = 2000, memory_limit_kb: int = 262144) -> ExecutionLimit:

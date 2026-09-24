@@ -3,6 +3,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
+from src.client.llm import LLMConfig
 from src.core.enums import (
     ConstraintDataType,
     ConstraintScope,
@@ -58,14 +59,6 @@ class HintComment(BaseModel):
 class SolutionCode(BaseModel):
     language: Language
     content: str | None = None
-
-
-class LLMConfig(BaseModel):
-    model_name: str | None = None
-    model_version: str | None = None
-    prompt_version: str | None = None
-    temperature: float | None = None
-    top_k: int | None = 3
 
 
 def find_limit(

@@ -1,5 +1,6 @@
 import pytest
 
+from src.client.code_runner import RunResult
 from src.core.enums import DiscardReason, ExecutionStatus, Language
 from src.problem.nodes import semantic_validate as module
 from src.problem.nodes.semantic_validate import (
@@ -10,7 +11,6 @@ from src.problem.nodes.semantic_validate import (
     semantic_validate,
 )
 from src.problem.state import GraphState, ProblemExample, find_limit
-from src.shared.code_runner import RunResult
 from tests import fake_nodes
 from tests.fake_nodes import offline_except
 

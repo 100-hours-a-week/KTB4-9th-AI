@@ -6,16 +6,23 @@ from pydantic import BaseModel
 
 from src.core.config import get_settings
 from src.core.exception import LLMOutputParseError
-from src.problem.state import LLMConfig
 
 FENCE_PATTERN = re.compile(r"^```[a-zA-Z]*\n(.*?)\n?```$", re.DOTALL)
 
 __all__ = [
-    "LLMOutputParseError",
     "build_chat_model",
     "call_llm_structured",
     "strip_code_fence",
+    "LLMConfig",
 ]
+
+
+class LLMConfig(BaseModel):
+    model_name: str | None = None
+    model_version: str | None = None
+    prompt_version: str | None = None
+    temperature: float | None = None
+    top_k: int | None = 3
 
 
 def strip_code_fence(text: str) -> str:
