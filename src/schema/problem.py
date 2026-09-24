@@ -27,11 +27,6 @@ class ExecutionLimit(CamelBaseModel):
     memory_limit_kb: int
 
 
-class Keyword(CamelBaseModel):
-    keyword: str
-    is_included: bool
-
-
 class ProblemExample(CamelBaseModel):
     input: str
     output: str

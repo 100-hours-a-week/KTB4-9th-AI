@@ -1,6 +1,11 @@
 from src.core.enums import Category
 from src.schema.base import BaseResponse, CamelBaseModel
-from src.schema.problem import ExecutionLimit, InputConstraint, Keyword
+from src.schema.problem import ExecutionLimit, InputConstraint
+
+
+class Keyword(CamelBaseModel):
+    keyword: str
+    is_included: bool
 
 
 class EvaluationRequest(CamelBaseModel):

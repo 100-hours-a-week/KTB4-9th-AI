@@ -6,13 +6,13 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.enums import Category, Difficulty, DiscardReason
-from src.schema.problem import FewshotSeedCreate, Problem
-from src.shared.model import (
+from src.db.models import (
     DiscardedProblem,
     FewshotSeed,
     GeneratedProblem,
     ProblemEmbedding,
 )
+from src.schema.problem import FewshotSeedCreate, Problem
 
 
 class SimilarProblem(NamedTuple):

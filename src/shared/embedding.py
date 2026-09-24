@@ -13,7 +13,7 @@
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from src.core.config import get_settings
-from src.shared.model import EMBEDDING_DIM
+from src.core.constants import EMBEDDING_DIM
 
 EMBEDDING_MODEL = "models/gemini-embedding-2"
 

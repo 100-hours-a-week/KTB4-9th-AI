@@ -3,6 +3,7 @@ import uuid
 
 import pytest
 
+from src.core.constants import EMBEDDING_DIM
 from src.core.enums import ConstraintDataType, ConstraintScope
 from src.problem.nodes import finalize as module
 from src.problem.nodes.finalize import (
@@ -19,7 +20,6 @@ from src.problem.state import (
     SolutionCode,
 )
 from src.schema.problem import Problem
-from src.shared.model import EMBEDDING_DIM
 from tests import fake_nodes
 
 PROBLEM_ID = uuid.UUID("11111111-2222-3333-4444-555555555555")

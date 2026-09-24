@@ -8,9 +8,9 @@ import logging
 from typing import Any
 
 from src.core.enums import Category
+from src.db.repository import DiscardedProblemRepository
+from src.db.session import session_scope
 from src.problem.state import GraphState
-from src.shared.db_client import session_scope
-from src.shared.repository import DiscardedProblemRepository
 
 logger = logging.getLogger(__name__)
 

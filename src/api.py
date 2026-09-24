@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.exception import ProblemGenerationError
 from src.core.exception_handler import register_exception_handlers
 from src.core.logging import setup_logging
+from src.db.session import close_engine, get_session
 from src.problem.graph import build_graph
 from src.problem.nodes.finalize import build_problem
 from src.problem.state import GraphState
@@ -22,7 +23,6 @@ from src.schema.problem import (
     ProblemRequest,
     ProblemResponse,
 )
-from src.shared.db_client import close_engine, get_session
 
 logger = logging.getLogger(__name__)
 

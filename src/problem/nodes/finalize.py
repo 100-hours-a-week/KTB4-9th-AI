@@ -8,14 +8,14 @@ import logging
 import uuid
 
 from src.core.exception import ProblemSaveError
-from src.problem.state import GraphState
-from src.schema.problem import Problem
-from src.shared.db_client import session_scope
-from src.shared.embedding import EMBEDDING_MODEL
-from src.shared.repository import (
+from src.db.repository import (
     GeneratedProblemRepository,
     ProblemEmbeddingRepository,
 )
+from src.db.session import session_scope
+from src.problem.state import GraphState
+from src.schema.problem import Problem
+from src.shared.embedding import EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 

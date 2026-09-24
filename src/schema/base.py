@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 
-from src.core.exception import ErrorCode
+from src.core.enums import ErrorCode
 
 
 def to_camel(string: str) -> str:
