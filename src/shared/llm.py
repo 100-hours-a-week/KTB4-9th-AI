@@ -4,9 +4,9 @@ from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 
+from src.core.config import get_settings
 from src.core.exception import LLMOutputParseError
 from src.problem.state import LLMConfig
-from src.shared.config import get_settings
 
 FENCE_PATTERN = re.compile(r"^```[a-zA-Z]*\n(.*?)\n?```$", re.DOTALL)
 

@@ -1,7 +1,7 @@
 import httpx
 
+from src.core.config import get_settings
 from src.schema import BattleProblem, Problem
-from src.shared.config import get_settings
 
 _settings = get_settings()
 
