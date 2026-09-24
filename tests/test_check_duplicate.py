@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 
-from src.enum import Category, DiscardReason
+from src.core.enums import Category, DiscardReason
 from src.problem.nodes import check_duplicate as module
 from src.problem.nodes.check_duplicate import (
     DUPLICATE_SIMILARITY,

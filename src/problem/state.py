@@ -3,7 +3,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from src.enum import (
+from src.core.enums import (
     ConstraintDataType,
     ConstraintScope,
     Difficulty,

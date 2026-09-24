@@ -1,6 +1,6 @@
 import pytest
 
-from src.enum import DiscardReason
+from src.core.enums import DiscardReason
 from src.problem.nodes import generate_nl_keyword as module
 from src.problem.nodes.generate_nl_keyword import (
     KEYWORD_MAX,

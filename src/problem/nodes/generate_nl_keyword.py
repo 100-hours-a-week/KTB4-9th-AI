@@ -2,7 +2,7 @@ import logging
 
 from pydantic import BaseModel, Field
 
-from src.enum import DiscardReason
+from src.core.enums import DiscardReason
 from src.problem.render import render_problem
 from src.problem.state import GraphState, LLMConfig, discard
 from src.shared.llm import call_llm_structured

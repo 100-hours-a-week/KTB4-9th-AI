@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.enum import ConstraintDataType, Difficulty, Language
+from src.core.enums import ConstraintDataType, Difficulty, Language
 from src.problem.nodes import generate_problem as module
 from src.problem.nodes.generate_problem import (
     GeneratedProblem,

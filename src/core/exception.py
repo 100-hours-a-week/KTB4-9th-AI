@@ -1,4 +1,4 @@
-from src.enum import ErrorCode
+from src.core.enums import ErrorCode
 
 
 class CosmosError(Exception):

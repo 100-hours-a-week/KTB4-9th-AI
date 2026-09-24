@@ -7,7 +7,7 @@
 import logging
 from typing import Any
 
-from src.enum import Category
+from src.core.enums import Category
 from src.problem.state import GraphState
 from src.shared.db_client import session_scope
 from src.shared.repository import DiscardedProblemRepository

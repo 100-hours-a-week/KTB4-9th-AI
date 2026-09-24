@@ -7,7 +7,7 @@
 빠뜨리면 테스트가 실제 API를 때리거나 개발용 DB에 쓰레기 행을 쌓는다.
 """
 
-from src.enum import ConstraintDataType, ConstraintScope, Language
+from src.core.enums import ConstraintDataType, ConstraintScope, Language
 from src.problem.state import (
     ExecutionLimit,
     GraphState,

@@ -1,6 +1,6 @@
 import pytest
 
-from src.enum import DiscardReason, ExecutionStatus, Language
+from src.core.enums import DiscardReason, ExecutionStatus, Language
 from src.problem.nodes import semantic_validate as module
 from src.problem.nodes.semantic_validate import (
     LogicVerdict,

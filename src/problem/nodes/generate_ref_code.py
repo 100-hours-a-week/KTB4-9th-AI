@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from src.enum import Language
+from src.core.enums import Language
 from src.problem.render import render_problem
 from src.problem.state import GraphState, LLMConfig
 from src.shared.llm import LLMOutputParseError, call_llm_structured, strip_code_fence

@@ -2,7 +2,7 @@ from collections.abc import Callable
 
 import pytest
 
-from src.enum import DiscardReason, ExecutionStatus, Language
+from src.core.enums import DiscardReason, ExecutionStatus, Language
 from src.problem.nodes import generate_testcase as module
 from src.problem.nodes.generate_testcase import (
     MAX_REPORTED_FAILURES,

@@ -6,7 +6,7 @@ algorithm_core를 임베딩해 같은 카테고리의 기존 문제와 비교한
 
 import logging
 
-from src.enum import Category, DiscardReason
+from src.core.enums import Category, DiscardReason
 from src.problem.state import GraphState, discard
 from src.shared.db_client import session_scope
 from src.shared.embedding import EMBEDDING_MODEL, embed_text

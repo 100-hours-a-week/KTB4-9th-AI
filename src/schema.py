@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.enum import (
+from src.core.enums import (
     Category,
     ConstraintDataType,
     ConstraintScope,

@@ -1,6 +1,6 @@
 import pytest
 
-from src.enum import DiscardReason, Language
+from src.core.enums import DiscardReason, Language
 from src.problem.nodes import generate_solution_code as module
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.nodes.generate_solution_code import (

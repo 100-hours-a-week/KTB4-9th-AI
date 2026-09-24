@@ -29,7 +29,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from src.enum import ExecutionStatus, Language
+from src.core.enums import ExecutionStatus, Language
 from src.problem.state import ExecutionLimit
 
 logger = logging.getLogger(__name__)

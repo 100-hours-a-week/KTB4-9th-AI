@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from src.enum import ExecutionStatus, Language
+from src.core.enums import ExecutionStatus, Language
 from src.problem.state import ExecutionLimit
 from src.shared import code_runner
 from src.shared.code_runner import (

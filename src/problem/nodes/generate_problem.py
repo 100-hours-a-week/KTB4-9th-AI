@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from src.enum import Category, Difficulty, Language
+from src.core.enums import Category, Difficulty, Language
 from src.problem.state import (
     ExecutionLimit,
     GraphState,

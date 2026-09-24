@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 
-from src.enum import ConstraintDataType, ConstraintScope
+from src.core.enums import ConstraintDataType, ConstraintScope
 from src.problem.nodes import finalize as module
 from src.problem.nodes.finalize import (
     EMBEDDING_MODEL,

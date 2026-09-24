@@ -5,7 +5,7 @@ from typing import Any, NamedTuple
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.enum import Category, Difficulty, DiscardReason
+from src.core.enums import Category, Difficulty, DiscardReason
 from src.schema import FewshotSeedCreate, Problem
 from src.shared.model import (
     DiscardedProblem,
