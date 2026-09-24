@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -139,3 +140,9 @@ def build_graph(overrides: dict[str, NodeFn] | None = None) -> CompiledStateGrap
     builder.add_edge("discard_problem", END)
 
     return builder.compile()
+
+
+@lru_cache(maxsize=1)
+def get_graph():
+    """그래프는 한 번만 조립한다. 요청마다 다시 만들 이유가 없다."""
+    return build_graph()

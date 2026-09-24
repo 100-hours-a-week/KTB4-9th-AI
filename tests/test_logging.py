@@ -2,9 +2,9 @@ import logging
 
 from fastapi.testclient import TestClient
 
-from src.api import app
 from src.core.config import get_settings
 from src.core.logging import setup_logging
+from src.main import app
 
 
 def test_setup_logging_attaches_a_single_console_handler() -> None:
