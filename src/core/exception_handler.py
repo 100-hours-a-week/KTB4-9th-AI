@@ -7,7 +7,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core.enums import ErrorCode
 from src.core.exception import CosmosError
-from src.schema import BaseResponse
+from src.schema.base import BaseResponse
 
 logger = logging.getLogger(__name__)
 

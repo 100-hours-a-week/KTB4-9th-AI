@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.enums import Category, Difficulty, DiscardReason
-from src.schema import FewshotSeedCreate, Problem
+from src.schema.problem import FewshotSeedCreate, Problem
 from src.shared.model import (
     DiscardedProblem,
     FewshotSeed,

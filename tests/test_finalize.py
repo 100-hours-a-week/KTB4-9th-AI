@@ -18,7 +18,7 @@ from src.problem.state import (
     InputConstraint,
     SolutionCode,
 )
-from src.schema import Problem
+from src.schema.problem import Problem
 from src.shared.model import EMBEDDING_DIM
 from tests import fake_nodes
 

@@ -10,16 +10,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exception import ProblemGenerationError
-from src.core.handler import register_exception_handlers
+from src.core.exception_handler import register_exception_handlers
 from src.core.logging import setup_logging
 from src.problem.graph import build_graph
 from src.problem.nodes.finalize import build_problem
 from src.problem.state import GraphState
-from src.schema import (
+from src.schema.evaluation import EvaluationRequest, EvaluationResponse
+from src.schema.problem import (
     BattleProblemResponse,
     DailyProblemResponse,
-    EvaluationRequest,
-    EvaluationResponse,
     ProblemRequest,
     ProblemResponse,
 )
