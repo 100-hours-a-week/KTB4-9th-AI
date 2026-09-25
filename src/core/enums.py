@@ -71,10 +71,7 @@ class ExecutionStatus(StrEnum):
     TIMED_OUT = "TIMED_OUT"  # 실행 제한 시간 초과
     RUNTIME_ERROR = "RUNTIME_ERROR"  # 0이 아닌 코드로 종료, 시그널로 죽음
     COMPILE_ERROR = "COMPILE_ERROR"  # 컴파일 실패 (컴파일 언어용)
-    MEMORY_EXCEEDED = "MEMORY_EXCEEDED"  # 메모리 제한 초과
-    OUTPUT_EXCEEDED = "OUTPUT_EXCEEDED"  # 출력이 상한을 넘음
-    UNSUPPORTED_LANGUAGE = "UNSUPPORTED_LANGUAGE"  # 실행기가 지원하지 않는 언어
-    INTERNAL_ERROR = "INTERNAL_ERROR"  # 실행기 자체의 실패
+    INTERNAL_ERROR = "INTERNAL_ERROR"  # 채점 서버 장애 또는 알 수 없는 상태
 
 
 class DiscardReason(StrEnum):
