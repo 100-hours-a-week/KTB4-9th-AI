@@ -7,8 +7,10 @@ from src.problem.render import render_problem
 from src.problem.state import GraphState
 
 MODEL_NAME = "gemini-3.7-flash"
-PROMPT_VERSION = "generate_ref_code/v2"
+PROMPT_VERSION = "generate_ref_code/v3"
 REFERENCE_LANGUAGE = Language.PYTHON
+# 채점 서버(judge0 language_id 71)의 파이썬 버전. 서버를 올리면 같이 바꾼다.
+REFERENCE_RUNTIME = "Python 3.8"
 
 GENERATE_REF_CODE_PROMPT = """당신은 알고리즘 문제 풀이자다.
 
@@ -18,6 +20,10 @@ GENERATE_REF_CODE_PROMPT = """당신은 알고리즘 문제 풀이자다.
 [규칙]
 - {language}로 푼다. 표준 입력으로 읽고 표준 출력으로 쓴다.
 - 표준 라이브러리만 사용한다.
+- {runtime}에서 실행된다. 이후 버전에서 추가된 문법과 함수는 쓰지 않는다.
+  (list[int] 같은 타입 힌트, int | None, match 문, math.lcm,
+   itertools.pairwise, functools.cache, str.removeprefix 등)
+- 타입 힌트는 쓰지 않는다.
 - 실행 제한 {time_limit_ms}ms, {memory_limit_kb}KB 안에 동작해야 한다.
 - code에는 설명과 주석 없이 실행 가능한 소스 코드만 넣는다.
 """
@@ -48,6 +54,7 @@ def build_prompt(state: GraphState) -> str:
     return GENERATE_REF_CODE_PROMPT.format(
         problem=render_problem(state, include_category=False),
         language=REFERENCE_LANGUAGE,
+        runtime=REFERENCE_RUNTIME,
         time_limit_ms=limit.time_limit_ms,
         memory_limit_kb=limit.memory_limit_kb,
     )

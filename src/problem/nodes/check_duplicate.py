@@ -37,7 +37,7 @@ async def check_duplicate(state: GraphState) -> dict:
         state (GraphState): generate_problem 결과가 채워진 상태
 
     Returns:
-        dict: 신규면 is_duplicated=False와 임베딩. 중복이거나 실패하면 폐기 정보
+        dict: 신규면 임베딩. 중복이거나 실패하면 폐기 정보
     """
     if not state.algorithm_core:
         return discard(DiscardReason.EMPTY_FIELD, "핵심 풀이가 비어 중복 검사 불가")
@@ -80,4 +80,4 @@ async def check_duplicate(state: GraphState) -> dict:
             f"- 기존 문제 {closest.problem_id}: {closest.algorithm_core}",
         )
 
-    return {"is_duplicated": False, "algorithm_core_embedding": embedding}
+    return {"algorithm_core_embedding": embedding}
