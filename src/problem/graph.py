@@ -74,7 +74,7 @@ def route_after_static(state: GraphState) -> str:
 
 def route_after_duplicate(state: GraphState) -> str:
     """중복이면 폐기, 신규면 검증용 코드 생성으로 보낸다."""
-    if state.is_discarded or state.is_duplicated:
+    if state.is_discarded:
         return "discard_problem"
     return "generate_ref_code"
 

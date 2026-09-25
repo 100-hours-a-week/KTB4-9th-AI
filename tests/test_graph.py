@@ -51,10 +51,7 @@ async def test_정적검증_실패면_폐기로_끝나고_병렬_노드는_안_�
 @pytest.mark.asyncio
 async def test_중복이면_폐기로_끝난다():
     async def always_duplicate(state: GraphState) -> dict:
-        return {
-            "is_duplicated": True,
-            **discard(DiscardReason.DUPLICATE, "유사 문제 존재"),
-        }
+        return discard(DiscardReason.DUPLICATE, "유사 문제 존재")
 
     state = await run({"check_duplicate": always_duplicate})
 

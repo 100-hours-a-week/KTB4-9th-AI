@@ -133,7 +133,6 @@ class GraphState(BaseModel):
     is_statically_validated: bool = False
 
     # ---- 중복 검사
-    is_duplicated: bool = False
     algorithm_core: str | None = None
     # check_duplicate가 만들어 finalize가 색인에 다시 쓴다. 두 번 부르지 않는다.
     algorithm_core_embedding: list[float] | None = None

@@ -55,7 +55,7 @@ async def generate_problem(state: GraphState) -> dict:
 
 async def check_duplicate(state: GraphState) -> dict:
     """항상 신규로 판정한다."""
-    return {"is_duplicated": False}
+    return {}
 
 
 async def generate_ref_code(state: GraphState) -> dict:
