@@ -104,7 +104,7 @@ class ProblemResponse(BaseResponse):
 
 
 class DailyProblemResponse(BaseResponse):
-    problem: Problem | None = None
+    problems: list[Problem] = Field(default_factory=list)
 
 
 class BattleProblemResponse(BaseResponse):
