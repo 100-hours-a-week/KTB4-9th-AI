@@ -171,10 +171,10 @@ async def generate_problem(state: GraphState) -> dict:
     Raises:
         LLMOutputParseError: 응답이 형식에 맞지 않는 경우
     """
+    # temperature는 넘기지 않는다. 이 모델은 고정 샘플링이라 값을 무시한다.
     cfg = LLMConfig(
         model_name=MODEL_NAME,
         prompt_version=PROMPT_VERSION,
-        temperature=0.9,
         top_k=3,
     )
 

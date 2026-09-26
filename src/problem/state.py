@@ -10,6 +10,8 @@ from src.core.enums import (
     Difficulty,
     DiscardReason,
     Language,
+    ProblemPurpose,
+    Trigger,
 )
 
 HIDDEN_TEST_CASE_COUNT = 7  # 문제당 보관할 비공개 테스트 케이스 수
@@ -106,6 +108,9 @@ class GraphState(BaseModel):
     # ---- input
     requested_difficulty: Difficulty
     requested_category: str
+    # 노드는 읽지 않는다. finalize가 저장할 때 전송 대상을 가르는 데만 쓴다.
+    trigger: Trigger = Trigger.ON_DEMAND
+    purpose: ProblemPurpose = ProblemPurpose.NORMAL
 
     # ---- problem
     difficulty: Difficulty | None = None

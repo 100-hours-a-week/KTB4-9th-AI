@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from src.core.enums import Trigger
 from src.core.exception import ProblemGenerationError
 from src.problem.daily import generate_daily_problems
 from src.problem.graph import get_graph
@@ -36,7 +37,7 @@ async def make_problem(request: ProblemRequest) -> ProblemResponse:
 @router.post("/api/llm/problem/daily")
 async def make_daily_problem() -> DailyProblemResponse:
     """데일리 문제 5개를 생성한다. 하나도 만들지 못하면 502로 응답한다."""
-    problems = await generate_daily_problems()
+    problems = await generate_daily_problems(Trigger.ON_DEMAND)
 
     if not problems:
         raise ProblemGenerationError("데일리 문제를 하나도 만들지 못했습니다")

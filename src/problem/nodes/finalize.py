@@ -99,7 +99,9 @@ async def finalize(state: GraphState) -> dict:
 
     try:
         async with session_scope() as session:
-            row = await GeneratedProblemRepository(session).add(problem)
+            row = await GeneratedProblemRepository(session).add(
+                problem, trigger=state.trigger, purpose=state.purpose
+            )
             problem_id = row.id
             await index_embedding(session, problem_id, state, problem)
     except Exception as error:
@@ -107,9 +109,11 @@ async def finalize(state: GraphState) -> dict:
         raise ProblemSaveError(f"문제 저장 실패: {error}") from error
 
     logger.info(
-        "문제 저장: %s / %s / %s",
+        "문제 저장: %s / %s / %s (%s/%s)",
         problem_id,
         problem.category.value,
         problem.difficulty.value,
+        state.trigger.value,
+        state.purpose.value,
     )
     return {"problem_id": problem_id}
