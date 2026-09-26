@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from src.core.exception import ProblemGenerationError
+from src.problem.daily import generate_daily_problems
 from src.problem.graph import get_graph
 from src.problem.nodes.finalize import build_problem
 from src.problem.state import GraphState
@@ -34,7 +35,13 @@ async def make_problem(request: ProblemRequest) -> ProblemResponse:
 
 @router.post("/api/llm/problem/daily")
 async def make_daily_problem() -> DailyProblemResponse:
-    return {"status": "ok"}
+    """데일리 문제 5개를 생성한다. 하나도 만들지 못하면 502로 응답한다."""
+    problems = await generate_daily_problems()
+
+    if not problems:
+        raise ProblemGenerationError("데일리 문제를 하나도 만들지 못했습니다")
+
+    return DailyProblemResponse(problems=problems)
 
 
 @router.post("/api/llm/problem/battle")
