@@ -1,4 +1,4 @@
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 
 
 class Difficulty(StrEnum):
@@ -10,8 +10,24 @@ class Difficulty(StrEnum):
 
 
 class Trigger(StrEnum):
+    """문제를 만든 경로. BATCH로 만든 문제만 새벽 전송 대상이다."""
+
     BATCH = "BATCH"
-    ON_DEMAND = "ON_DEMAND"
+    ON_DEMAND = "ON_DEMAND"  # API 응답으로 이미 Spring에 나감
+
+
+class ProblemPurpose(StrEnum):
+    """문제 용도. 전송할 Spring 엔드포인트가 이것으로 갈린다."""
+
+    NORMAL = "NORMAL"  # POST /problems
+    DAILY = "DAILY"  # POST /daily-problems
+
+
+class LockKey(IntEnum):
+    """Postgres advisory lock 키. DB 전체에서 하나의 이름공간이라 한곳에 모은다."""
+
+    BATCH_GENERATE = 1001
+    BATCH_SEND = 1002  # 생성과 키가 달라야 생성 중에도 3시 전송이 돈다
 
 
 class Language(StrEnum):

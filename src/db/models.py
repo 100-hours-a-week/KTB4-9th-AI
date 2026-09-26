@@ -4,12 +4,19 @@ from enum import StrEnum
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, and_, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from src.core.constants import EMBEDDING_DIM
-from src.core.enums import Category, Difficulty, DiscardReason, SeedSource
+from src.core.enums import (
+    Category,
+    Difficulty,
+    DiscardReason,
+    ProblemPurpose,
+    SeedSource,
+    Trigger,
+)
 
 # JSONB 컬럼 규칙: Pydantic 스키마의 model_dump(mode="json") 결과(snake_case)그대로 저장
 JsonList = list[dict[str, Any]]
@@ -35,6 +42,7 @@ class GeneratedProblem(Base):
     """Spring 전송 대기 버퍼. 전송 후에도 문제 전문을 보관한다.
 
     컬럼 구성은 스키마의 Problem과 1:1로 맞춘다.
+    trigger·purpose는 전송 대상을 고르는 관리용이라 Problem에 없다.
     """
 
     __tablename__ = "generated_problems"
@@ -65,18 +73,28 @@ class GeneratedProblem(Base):
     hint_comments: Mapped[JsonList] = mapped_column(JSONB)  # list[HintComment]
     solution_keywords: Mapped[list[str]] = mapped_column(JSONB)  # 채점 키워드
 
+    # 새벽 전송은 trigger=BATCH만 보내고, purpose로 엔드포인트를 고른다.
+    trigger: Mapped[Trigger] = mapped_column(
+        _enum_col(Trigger), server_default=Trigger.ON_DEMAND.value
+    )
+    purpose: Mapped[ProblemPurpose] = mapped_column(
+        _enum_col(ProblemPurpose), server_default=ProblemPurpose.NORMAL.value
+    )
+
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
     __table_args__ = (
-        # 미전송 재고 조회용 부분 인덱스
+        # 배치 미전송 재고 조회용 부분 인덱스.
+        # ON_DEMAND 행은 sent_at이 영영 비어 있으므로 인덱스에서 뺀다.
         Index(
             "ix_generated_problems_pending",
+            "purpose",
             "category",
             "difficulty",
-            postgresql_where=sent_at.is_(None),
+            postgresql_where=and_(sent_at.is_(None), trigger == Trigger.BATCH),
         ),
     )
 
