@@ -7,9 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.enums import Category, Difficulty, DiscardReason
 from src.db.models import (
+    BattleProblem,
+    BattleProblemEmbedding,
     DiscardedProblem,
     FewshotSeed,
     GeneratedProblem,
+    JsonList,
     ProblemEmbedding,
 )
 from src.schema.problem import FewshotSeedCreate, Problem
@@ -193,3 +196,79 @@ class FewshotSeedRepository:
             .limit(k)
         )
         return (await self.session.scalars(stmt)).all()
+
+
+# ── 5. Battle ───────────────────────────────────────────────────
+
+
+class BattleProblemRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def add(
+        self,
+        *,
+        category: Category,
+        problem_title: str,
+        problem_content: str,
+        test_cases: JsonList,
+    ) -> BattleProblem:
+        row = BattleProblem(
+            category=category,
+            problem_title=problem_title,
+            problem_content=problem_content,
+            test_cases=test_cases,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+
+class BattleProblemEmbeddingRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def add(
+        self,
+        *,
+        battle_problem_id: uuid.UUID,
+        category: Category,
+        algorithm_core: str,
+        embedding: list[float],
+        embedding_model: str,
+    ) -> BattleProblemEmbedding:
+        row = BattleProblemEmbedding(
+            battle_problem_id=battle_problem_id,
+            category=category,
+            algorithm_core=algorithm_core,
+            embedding=embedding,
+            embedding_model=embedding_model,
+        )
+        self.session.add(row)
+        return row
+
+    async def find_similar(
+        self,
+        *,
+        category: Category,
+        embedding: list[float],
+        embedding_model: str,
+        limit: int = 5,
+    ) -> list[SimilarProblem]:
+        """같은 카테고리 + 같은 임베딩 모델 안에서 가장 비슷한 순으로."""
+        distance = BattleProblemEmbedding.embedding.cosine_distance(embedding)
+        stmt = (
+            select(
+                BattleProblemEmbedding.battle_problem_id,
+                BattleProblemEmbedding.algorithm_core,
+                (1 - distance).label("similarity"),
+            )
+            .where(
+                BattleProblemEmbedding.category == category,
+                BattleProblemEmbedding.embedding_model == embedding_model,
+            )
+            .order_by(distance)
+            .limit(limit)
+        )
+        rows = await self.session.execute(stmt)
+        return [SimilarProblem(*r) for r in rows]

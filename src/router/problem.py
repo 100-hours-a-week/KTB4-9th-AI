@@ -1,13 +1,17 @@
 from fastapi import APIRouter
 
 from src.core.exception import ProblemGenerationError
+from src.problem.battle.graph import get_battle_graph
+from src.problem.battle.state import BattleState
 from src.problem.daily import generate_daily_problems
 from src.problem.graph import get_graph
 from src.problem.nodes.finalize import build_problem
 from src.problem.state import GraphState
 from src.schema.problem import (
+    BattleProblem,
     BattleProblemResponse,
     DailyProblemResponse,
+    HiddenTestCase,
     ProblemRequest,
     ProblemResponse,
 )
@@ -46,4 +50,23 @@ async def make_daily_problem() -> DailyProblemResponse:
 
 @router.post("/api/llm/problem/battle")
 async def make_battle_problem() -> BattleProblemResponse:
-    return {"status": "ok"}
+    """배틀 문제 하나를 생성한다. 검증에서 걸리면 폐기되고 502로 응답한다."""
+    result = BattleState(**await get_battle_graph().ainvoke(BattleState()))
+
+    if result.is_discarded:
+        raise ProblemGenerationError(
+            f"배틀 문제를 만들지 못했습니다 "
+            f"({result.discard_stage}: {result.discard_reason})"
+        )
+
+    return BattleProblemResponse(
+        battle_problem=BattleProblem(
+            category=result.category,
+            problem_title=result.problem_title,
+            problem_content=result.problem_content,
+            test_cases=[
+                HiddenTestCase(input=case.input, output=case.output)
+                for case in result.test_cases
+            ],
+        )
+    )
