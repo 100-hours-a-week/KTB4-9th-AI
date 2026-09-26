@@ -177,3 +177,44 @@ class FewshotSeed(Base):
     __table_args__ = (
         Index("ix_fewshot_lookup", "category", "difficulty", "is_active"),
     )
+
+
+# ── 5. Battle ───────────────────────────────────────────────────
+
+
+class BattleProblem(Base):
+    """배틀 문제. 하루 한 번 생성하며 일반 문제와 분리해 보관한다."""
+
+    __tablename__ = "battle_problems"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+
+    category: Mapped[Category] = mapped_column(_enum_col(Category), index=True)
+
+    problem_title: Mapped[str] = mapped_column(String(255))
+    problem_content: Mapped[str] = mapped_column(Text)
+    test_cases: Mapped[JsonList] = mapped_column(JSONB)  # list[HiddenTestCase]
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class BattleProblemEmbedding(Base):
+    """배틀 문제 중복 검사용. 배틀끼리만 비교한다."""
+
+    __tablename__ = "battle_problem_embeddings"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    battle_problem_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("battle_problems.id", ondelete="CASCADE"), unique=True
+    )
+
+    category: Mapped[Category] = mapped_column(_enum_col(Category), index=True)
+    algorithm_core: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding_model: Mapped[str] = mapped_column(String(128))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
