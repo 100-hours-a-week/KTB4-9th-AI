@@ -1,11 +1,11 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any, NamedTuple
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.enums import Category, Difficulty, DiscardReason
+from src.core.enums import Category, Difficulty, DiscardReason, ProblemPurpose, Trigger
 from src.db.models import (
     DiscardedProblem,
     FewshotSeed,
@@ -28,8 +28,16 @@ class GeneratedProblemRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def add(self, problem: Problem) -> GeneratedProblem:
-        row = GeneratedProblem(**problem.model_dump(mode="json"))
+    async def add(
+        self,
+        problem: Problem,
+        *,
+        trigger: Trigger,
+        purpose: ProblemPurpose,
+    ) -> GeneratedProblem:
+        row = GeneratedProblem(
+            **problem.model_dump(mode="json"), trigger=trigger, purpose=purpose
+        )
         self.session.add(row)
         await self.session.flush()  # id 확정 (임베딩 저장에 필요)
         return row
@@ -37,28 +45,55 @@ class GeneratedProblemRepository:
     async def get(self, problem_id: uuid.UUID) -> GeneratedProblem | None:
         return await self.session.get(GeneratedProblem, problem_id)
 
+    async def count_pending(
+        self, purpose: ProblemPurpose = ProblemPurpose.NORMAL
+    ) -> dict[tuple[Category, Difficulty], int]:
+        """배치로 만들어 두고 아직 보내지 않은 재고를 조합별로 센다.
+
+        생성 개수를 정할 때 Spring 재고와 합산한다. 없는 조합은 키가 없다.
+        """
+        stmt = (
+            select(
+                GeneratedProblem.category,
+                GeneratedProblem.difficulty,
+                func.count(),
+            )
+            .where(
+                GeneratedProblem.sent_at.is_(None),
+                GeneratedProblem.trigger == Trigger.BATCH,
+                GeneratedProblem.purpose == purpose,
+            )
+            .group_by(GeneratedProblem.category, GeneratedProblem.difficulty)
+        )
+        rows = await self.session.execute(stmt)
+        return {(category, difficulty): count for category, difficulty, count in rows}
+
     async def list_pending(
         self,
-        category: Category | None = None,
-        difficulty: Difficulty | None = None,
+        purpose: ProblemPurpose,
         limit: int = 50,
+        exclude_ids: Collection[uuid.UUID] = (),
     ) -> Sequence[GeneratedProblem]:
-        """미전송 문제를 오래된 순으로. 조건을 비우면 전체.
+        """배치로 만든 미전송 문제를 오래된 순으로.
 
-        다른 프로세스가 같은 행을 동시에 보내지 않도록 행 잠금을 건다.
-        잠금은 트랜잭션이 끝날 때 풀리므로 전송 → mark_sent를 같은 세션에서 한다.
+        행 잠금은 걸지 않는다. 전송은 몇 분씩 재시도할 수 있어 트랜잭션을
+        열어 둔 채 보낼 수 없고, 두 곳에서 동시에 보내는 일은 전송 배치의
+        advisory lock이 막는다.
+
+        Parameters:
+            purpose (ProblemPurpose): 용도
+            limit (int): 최대 개수
+            exclude_ids (Collection[uuid.UUID]): 뺄 행. 이번 실행에서 거부된 문제
         """
-        stmt = select(GeneratedProblem).where(GeneratedProblem.sent_at.is_(None))
-        if category is not None:
-            stmt = stmt.where(GeneratedProblem.category == category)
-        if difficulty is not None:
-            stmt = stmt.where(GeneratedProblem.difficulty == difficulty)
-        stmt = (
-            stmt.order_by(GeneratedProblem.created_at)
-            .limit(limit)
-            .with_for_update(skip_locked=True)
+        stmt = select(GeneratedProblem).where(
+            GeneratedProblem.sent_at.is_(None),
+            GeneratedProblem.trigger == Trigger.BATCH,
+            GeneratedProblem.purpose == purpose,
         )
-        return (await self.session.scalars(stmt)).all()
+        if exclude_ids:
+            stmt = stmt.where(GeneratedProblem.id.not_in(exclude_ids))
+        stmt = stmt.order_by(GeneratedProblem.created_at, GeneratedProblem.id)
+        return (await self.session.scalars(stmt.limit(limit))).all()
 
     async def mark_sent(self, problem_ids: Sequence[uuid.UUID]) -> int:
         """전송 완료 표시. 실제로 바뀐 행 수를 돌려준다."""
