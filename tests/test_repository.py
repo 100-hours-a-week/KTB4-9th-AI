@@ -11,7 +11,7 @@ from src.db.repository import BattleProblemRepository, GeneratedProblemRepositor
 from src.db.session import engine
 from src.schema.problem import Problem
 
-KEY = (Category.HASH_TABLE, Difficulty.LV2)
+KEY = (Category.HASH, Difficulty.LV2)
 
 
 @pytest_asyncio.fixture

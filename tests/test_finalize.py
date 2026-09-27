@@ -34,7 +34,7 @@ VECTOR = [0.1] * EMBEDDING_DIM
 
 async def make_state(**updates) -> GraphState:
     """검증을 모두 통과한 상태."""
-    base = GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
+    base = GraphState(requested_difficulty="LV2", requested_category="HASH")
     state = base.model_copy(update=await fake_nodes.generate_problem(base))
     return state.model_copy(
         update={

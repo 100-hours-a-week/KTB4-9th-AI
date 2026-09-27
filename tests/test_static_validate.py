@@ -23,9 +23,9 @@ def make_state(**overrides) -> GraphState:
     """정적 검증을 통과하는 기본 상태를 만들고, 필요한 필드만 바꿔 끼운다."""
     base = {
         "requested_difficulty": Difficulty.LV2,
-        "requested_category": "HASH_TABLE",
+        "requested_category": "HASH",
         "difficulty": Difficulty.LV2,
-        "category": "HASH_TABLE",
+        "category": "HASH",
         "category_select_reason": "M - x 존재 여부를 O(1)에 조회하는 것이 핵심",
         "problem_title": "합이 M인 쌍의 개수",
         "problem_content": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",

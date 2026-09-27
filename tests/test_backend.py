@@ -95,7 +95,7 @@ def make_problem() -> Problem:
         output_format="쌍의 수",
         requested_difficulty=Difficulty.LV2,
         difficulty=Difficulty.LV2,
-        category=Category.HASH_TABLE,
+        category=Category.HASH,
         category_select_reason="해시맵으로 푼다",
         input_constraints=[],
         execution_limits=[],
@@ -141,7 +141,7 @@ def make_full_problem() -> Problem:
 
 def make_battle() -> BattleProblem:
     return BattleProblem(
-        category=Category.HASH_TABLE,
+        category=Category.HASH,
         problem_title="중복 찾기",
         problem_content="처음으로 두 번 나온 수를 출력하라",
         test_cases=[HiddenTestCase(input=f"{n}", output=f"{n}") for n in range(3)],
@@ -196,21 +196,6 @@ async def test_unreadable_entry_is_skipped_not_fatal(monkeypatch, broken) -> Non
 
     assert [(d.difficulty, d.category) for d in demands] == [
         (Difficulty.LV3, Category.ARRAY)
-    ]
-
-
-@pytest.mark.asyncio
-async def test_spring_hash_category_is_read_as_hash_table(monkeypatch) -> None:
-    """못 읽고 건너뛰면 HASH_TABLE 재고가 늘 0이라 매일 15개씩 더 만든다."""
-    fix_backend(
-        monkeypatch,
-        demands_reply({"difficulty": "LV1", "category": "HASH", "count": 3}),
-    )
-
-    demands = await get_problem_demands()
-
-    assert demands == [
-        ProblemDemand(difficulty=Difficulty.LV1, category=Category.HASH_TABLE, count=3)
     ]
 
 
@@ -296,7 +281,9 @@ async def test_enums_are_sent_by_spring_name(monkeypatch) -> None:
 def test_every_enum_has_a_spring_name() -> None:
     """우리 enum에 값을 더하면 Spring에 같은 이름이 있는지 여기서 걸린다."""
     real = [c for c in Category if c != Category.RANDOM]
-    assert {backend._spring_category(c) for c in real} == SPRING_CATEGORIES
+    assert {c.name for c in real} == SPRING_CATEGORIES
+    # 재고 조회 응답은 값으로 읽는다. 못 읽는 카테고리는 재고가 늘 0이라 매일 더 만든다.
+    assert {c.value for c in real} == SPRING_CATEGORIES
     assert {lang.name for lang in Language} == SPRING_LANGUAGES
     assert {scope.name for scope in ConstraintScope} == SPRING_SCOPES
     assert {dtype.name for dtype in ConstraintDataType} <= SPRING_DATATYPES

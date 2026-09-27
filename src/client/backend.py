@@ -6,7 +6,7 @@
 재고 조회와 저장은 Spring이 제공하는 API라 Spring 형식에 맞춘다.
 우리 형식과 다른 점은 이 모듈에서만 바꾸고, 안쪽(LLM·DB·우리 API)은 그대로 둔다.
 - enum은 값이 아니라 이름(대문자)으로 주고받는다. 예: python → PYTHON, str → STRING
-- 카테고리 HASH_TABLE은 Spring에서 HASH다
+  이름은 Spring enum과 같게 둔다 (tests/test_backend.py가 확인한다)
 - 필드 이름: problemContent → problemDescription, solutionCodes → hintSolutionCodes
 """
 
@@ -16,7 +16,6 @@ import httpx
 from pydantic import ValidationError
 
 from src.core.config import get_settings
-from src.core.enums import Category
 from src.schema.batch import ProblemDemand, ProblemDemandResponse
 from src.schema.problem import BattleProblem, Problem
 
@@ -28,18 +27,10 @@ BACKEND_URL = _settings.backend_url
 
 REQUEST_TIMEOUT_S = 30.0
 
-# 이름이 다른 카테고리만 적는다. 나머지는 enum 이름이 Spring과 같다.
-CATEGORY_TO_SPRING = {Category.HASH_TABLE: "HASH"}
-CATEGORY_FROM_SPRING = {name: category for category, name in CATEGORY_TO_SPRING.items()}
-
 
 def _new_client() -> httpx.AsyncClient:
     """Spring HTTP 클라이언트. 테스트에서 가짜 전송으로 바꿔 끼운다."""
     return httpx.AsyncClient(base_url=BACKEND_URL, timeout=REQUEST_TIMEOUT_S)
-
-
-def _spring_category(category: Category) -> str:
-    return CATEGORY_TO_SPRING.get(category, category.name)
 
 
 def _problem_body(problem: Problem) -> dict:
@@ -54,7 +45,7 @@ def _problem_body(problem: Problem) -> dict:
         "inputFormat": problem.input_format,
         "outputFormat": problem.output_format,
         "difficulty": problem.difficulty.name,
-        "category": _spring_category(problem.category),
+        "category": problem.category.name,
         "categorySelectReason": problem.category_select_reason,
         "solutionKeywords": problem.solution_keywords,
         "problemExamples": [
@@ -96,19 +87,11 @@ def _problem_body(problem: Problem) -> dict:
 def _battle_body(problem: BattleProblem) -> dict:
     """배틀 문제를 Spring 저장 형식(AiBattleCreateRequestDto)으로 바꾼다."""
     return {
-        "category": _spring_category(problem.category),
+        "category": problem.category.name,
         "problemTitle": problem.problem_title,
         "problemDescription": problem.problem_content,
         "testCases": [case.model_dump(mode="json") for case in problem.test_cases],
     }
-
-
-def _from_spring_demand(entry: dict) -> dict:
-    """재고 항목의 Spring 카테고리 이름을 우리 값으로 바꾼다."""
-    category = entry.get("category")
-    if category in CATEGORY_FROM_SPRING:
-        return {**entry, "category": CATEGORY_FROM_SPRING[category]}
-    return entry
 
 
 async def get_problem_demands() -> list[ProblemDemand]:
@@ -134,7 +117,7 @@ async def get_problem_demands() -> list[ProblemDemand]:
     demands: list[ProblemDemand] = []
     for entry in body.data.problem_counts:
         try:
-            demands.append(ProblemDemand.model_validate(_from_spring_demand(entry)))
+            demands.append(ProblemDemand.model_validate(entry))
         except ValidationError as error:
             logger.warning("재고 항목을 해석할 수 없어 건너뜀: %r (%s)", entry, error)
     return demands

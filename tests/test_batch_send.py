@@ -23,7 +23,7 @@ def make_problem(title: str) -> Problem:
         output_format="쌍의 수",
         requested_difficulty=Difficulty.LV2,
         difficulty=Difficulty.LV2,
-        category=Category.HASH_TABLE,
+        category=Category.HASH,
         category_select_reason="해시맵으로 푼다",
         input_constraints=[],
         execution_limits=[],

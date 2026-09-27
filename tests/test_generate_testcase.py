@@ -32,7 +32,7 @@ def many_inputs(count: int = HIDDEN_TEST_CASE_COUNT) -> list[str]:
 
 async def make_state(**updates) -> GraphState:
     """의미 검증까지 통과한 상태를 만든다."""
-    base = GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
+    base = GraphState(requested_difficulty="LV2", requested_category="HASH")
     state = base.model_copy(update=await fake_nodes.generate_problem(base))
     return state.model_copy(update={"reference_code": REFERENCE_CODE, **updates})
 
