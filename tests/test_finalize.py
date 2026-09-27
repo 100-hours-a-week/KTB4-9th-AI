@@ -4,7 +4,12 @@ import uuid
 import pytest
 
 from src.core.constants import EMBEDDING_DIM
-from src.core.enums import ConstraintDataType, ConstraintScope
+from src.core.enums import (
+    ConstraintDataType,
+    ConstraintScope,
+    ProblemPurpose,
+    Trigger,
+)
 from src.problem.nodes import finalize as module
 from src.problem.nodes.finalize import (
     EMBEDDING_MODEL,
@@ -65,7 +70,7 @@ def fix_repository(monkeypatch: pytest.MonkeyPatch) -> tuple[list[Problem], list
         def __init__(self, session) -> None:
             pass
 
-        async def add(self, problem: Problem):
+        async def add(self, problem: Problem, *, trigger, purpose):
             saved.append(problem)
             return FakeRow()
 
@@ -147,6 +152,17 @@ async def test_graph_only_fields_are_dropped() -> None:
 
 
 @pytest.mark.asyncio
+async def test_trigger_and_purpose_are_not_sent_to_spring() -> None:
+    """Problem은 Spring으로 나가는 payload다. 관리용 값이 섞이면 안 된다."""
+    state = await make_state(trigger=Trigger.BATCH, purpose=ProblemPurpose.DAILY)
+
+    payload = build_problem(state).model_dump(mode="json", by_alias=True)
+
+    assert "trigger" not in payload
+    assert "purpose" not in payload
+
+
+@pytest.mark.asyncio
 async def test_missing_required_field_is_an_error() -> None:
     state = await make_state(difficulty=None)
 
@@ -168,6 +184,47 @@ async def test_node_saves_the_problem_and_returns_its_id(
     assert len(saved) == 1
     assert saved[0].problem_title
     assert result == {"problem_id": PROBLEM_ID}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("trigger", "purpose"),
+    [
+        (Trigger.ON_DEMAND, ProblemPurpose.NORMAL),
+        (Trigger.BATCH, ProblemPurpose.DAILY),
+    ],
+)
+async def test_node_saves_trigger_and_purpose_from_state(
+    monkeypatch: pytest.MonkeyPatch, trigger: Trigger, purpose: ProblemPurpose
+) -> None:
+    """이 값이 틀리면 새벽 전송에서 빠지거나 엉뚱한 엔드포인트로 나간다."""
+    options: list[dict] = []
+
+    @contextlib.asynccontextmanager
+    async def fake_scope():
+        yield object()
+
+    class FakeRow:
+        id = PROBLEM_ID
+
+    class RecordingRepository:
+        def __init__(self, session) -> None:
+            pass
+
+        async def add(self, problem, **kwargs):
+            options.append(kwargs)
+            return FakeRow()
+
+    async def skip_index(*args) -> None:
+        pass
+
+    monkeypatch.setattr(module, "session_scope", fake_scope)
+    monkeypatch.setattr(module, "GeneratedProblemRepository", RecordingRepository)
+    monkeypatch.setattr(module, "index_embedding", skip_index)
+
+    await finalize(await make_state(trigger=trigger, purpose=purpose))
+
+    assert options == [{"trigger": trigger, "purpose": purpose}]
 
 
 @pytest.mark.asyncio
@@ -197,7 +254,7 @@ async def test_failing_insert_is_raised(monkeypatch: pytest.MonkeyPatch) -> None
         def __init__(self, session) -> None:
             pass
 
-        async def add(self, problem):
+        async def add(self, problem, **options):
             raise RuntimeError("컬럼 제약 위반")
 
     monkeypatch.setattr(module, "session_scope", fake_scope)
