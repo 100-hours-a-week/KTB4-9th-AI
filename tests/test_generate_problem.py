@@ -206,6 +206,14 @@ def test_카테고리를_그대로_쓰게_한다():
     assert "RANDOM" not in prompt
 
 
+def test_프롬프트에_Spring_길이_제한이_있다():
+    prompt = build_prompt(Difficulty.LV2, Category.DP, [])
+
+    assert "problem_title은 30자 이하" in prompt
+    assert "problem_content는 2048자 이하" in prompt
+    assert "100자 이하의 한 문장" in prompt
+
+
 def test_프롬프트에_핵심_풀이_아이디어_규칙이_있다():
     prompt = build_prompt(Difficulty.LV2, Category.DP, [])
 
