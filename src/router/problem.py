@@ -9,7 +9,6 @@ from src.problem.graph import get_graph
 from src.problem.nodes.finalize import build_problem
 from src.problem.state import GraphState
 from src.schema.problem import (
-    BattleProblem,
     BattleProblemResponse,
     DailyProblemResponse,
     HiddenTestCase,
@@ -61,13 +60,11 @@ async def make_battle_problem() -> BattleProblemResponse:
         )
 
     return BattleProblemResponse(
-        battle_problem=BattleProblem(
-            category=result.category,
-            problem_title=result.problem_title,
-            problem_content=result.problem_content,
-            test_cases=[
-                HiddenTestCase(input=case.input, output=case.output)
-                for case in result.test_cases
-            ],
-        )
+        category=result.category,
+        problem_title=result.problem_title,
+        problem_content=result.problem_content,
+        test_cases=[
+            HiddenTestCase(input=case.input, output=case.output)
+            for case in result.test_cases
+        ],
     )
