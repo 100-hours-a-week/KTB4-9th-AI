@@ -9,7 +9,7 @@ from src.batch import send as module
 from src.batch.send import SEND_CHUNK_SIZE, SEND_RETRY_DELAYS_S, is_rejection, run_send
 from src.core.enums import Category, Difficulty, ProblemPurpose
 from src.problem.daily import DAILY_COUNT
-from src.schema.problem import Problem
+from src.schema.problem import BattleProblem, HiddenTestCase, Problem
 
 NORMAL = ProblemPurpose.NORMAL
 DAILY = ProblemPurpose.DAILY
@@ -37,11 +37,21 @@ def status_error(status: int, text: str = "") -> httpx.HTTPStatusError:
     return httpx.HTTPStatusError(f"{status}", request=request, response=response)
 
 
+def make_battle(title: str) -> BattleProblem:
+    return BattleProblem(
+        category=Category.ARRAY,
+        problem_title=title,
+        problem_content="N개의 정수 합을 출력하라",
+        test_cases=[HiddenTestCase(input="3\n1 2 3", output="6")],
+    )
+
+
 class FakeBuffer:
-    """generated_problems 대역. 넣은 순서가 곧 오래된 순서다."""
+    """generated_problems·battle_problems 대역. 넣은 순서가 곧 오래된 순서다."""
 
     def __init__(self) -> None:
         self.rows: list[tuple[uuid.UUID, ProblemPurpose, Problem]] = []
+        self.battles: list[tuple[uuid.UUID, BattleProblem]] = []
         self.sent: list[uuid.UUID] = []
         self.mark_error: Exception | None = None
 
@@ -54,11 +64,23 @@ class FakeBuffer:
             titles.append(title)
         return titles
 
+    def add_battle(self, count: int) -> list[str]:
+        titles = []
+        for _ in range(count):
+            title = f"BATTLE-{len(self.battles)}"
+            self.battles.append((uuid.uuid4(), make_battle(title)))
+            titles.append(title)
+        return titles
+
+    def titles_by_id(self) -> dict[uuid.UUID, str]:
+        rows = [(i, p) for i, _, p in self.rows] + self.battles
+        return {i: p.problem_title for i, p in rows}
+
     def id_of(self, title: str) -> uuid.UUID:
-        return next(i for i, _, p in self.rows if p.problem_title == title)
+        return next(i for i, t in self.titles_by_id().items() if t == title)
 
     def sent_titles(self) -> list[str]:
-        by_id = {i: p.problem_title for i, _, p in self.rows}
+        by_id = self.titles_by_id()
         return [by_id[i] for i in self.sent]
 
     async def load_chunk(self, purpose, limit, exclude_ids=()):
@@ -73,6 +95,13 @@ class FakeBuffer:
         if self.mark_error:
             raise self.mark_error
         self.sent.extend(problem_ids)
+
+    async def load_battle(self):
+        pending = [(i, p) for i, p in self.battles if i not in self.sent]
+        return pending[0] if pending else None
+
+    async def mark_battle_sent(self, problem_id):
+        await self.mark_sent([problem_id])
 
 
 class FakeSpring:
@@ -90,7 +119,10 @@ class FakeSpring:
     async def save_daily_problems(self, problems):
         self.handle("/daily-problems", problems)
 
-    def handle(self, path: str, problems: list[Problem]) -> None:
+    async def save_battle_problem(self, problem):
+        self.handle("/daily-battles/problem", [problem])
+
+    def handle(self, path: str, problems: list[Problem | BattleProblem]) -> None:
         titles = [p.problem_title for p in problems]
         self.requests.append((path, titles))
         if self.down_after is not None and len(self.requests) > self.down_after:
@@ -103,12 +135,18 @@ class FakeSpring:
     def sizes(self, path: str = "/problems") -> list[int]:
         return [len(titles) for p, titles in self.requests if p == path]
 
+    def paths(self) -> list[str]:
+        """요청한 경로를 처음 나온 순서대로."""
+        return list(dict.fromkeys(p for p, _ in self.requests))
+
 
 @pytest.fixture
 def buffer(monkeypatch: pytest.MonkeyPatch) -> FakeBuffer:
     fake = FakeBuffer()
     monkeypatch.setattr(module, "load_chunk", fake.load_chunk)
     monkeypatch.setattr(module, "mark_sent", fake.mark_sent)
+    monkeypatch.setattr(module, "load_battle", fake.load_battle)
+    monkeypatch.setattr(module, "mark_battle_sent", fake.mark_battle_sent)
     return fake
 
 
@@ -117,6 +155,7 @@ def spring(monkeypatch: pytest.MonkeyPatch) -> FakeSpring:
     fake = FakeSpring()
     monkeypatch.setattr(module, "save_problems", fake.save_problems)
     monkeypatch.setattr(module, "save_daily_problems", fake.save_daily_problems)
+    monkeypatch.setattr(module, "save_battle_problem", fake.save_battle_problem)
     monkeypatch.setattr(module, "SEND_RETRY_DELAYS_S", (0,) * len(SEND_RETRY_DELAYS_S))
 
     @contextlib.asynccontextmanager
@@ -220,6 +259,80 @@ async def test_daily_outage_is_retried_then_left_whole(buffer, spring, caplog) -
     assert buffer.sent == []
     assert "데일리 전송 실패(장애 지속)" in caplog.text
     assert "전송 배치 단계 실패" not in caplog.text
+
+
+# ── 배틀 ───────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_battle_sends_the_oldest_one_alone(buffer, spring) -> None:
+    """Spring은 하루 한 문제를 그날의 배틀로 쓴다. 남은 건 다음 날 나간다."""
+    first, _ = buffer.add_battle(2)
+
+    await run_send()
+
+    assert spring.requests == [("/daily-battles/problem", [first])]
+    assert buffer.sent_titles() == [first]
+
+
+@pytest.mark.asyncio
+async def test_missing_battle_is_warned_and_normal_still_goes(
+    buffer, spring, caplog
+) -> None:
+    titles = buffer.add(NORMAL, 2)
+
+    with caplog.at_level(logging.WARNING):
+        await run_send()
+
+    assert spring.requests == [("/problems", titles)]
+    assert "보낼 배틀 문제가 없음" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_rejected_battle_stays_and_normal_still_goes(
+    buffer, spring, caplog
+) -> None:
+    (battle,) = buffer.add_battle(1)
+    normal = buffer.add(NORMAL, 2)
+    spring.reject_titles = {battle}
+
+    with caplog.at_level(logging.ERROR):
+        await run_send()
+
+    assert spring.sizes("/daily-battles/problem") == [1]  # 거부는 다시 안 보낸다
+    assert buffer.sent_titles() == normal
+    assert "배틀 전송 실패(거부)" in caplog.text
+    assert "problemContent는 비어 있을 수 없습니다" in caplog.text
+    assert str(buffer.id_of(battle)) in caplog.text
+    assert "전송 배치 단계 실패" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_battle_outage_is_retried_then_left(buffer, spring, caplog) -> None:
+    buffer.add_battle(1)
+    spring.failures = [status_error(503)] * (1 + len(SEND_RETRY_DELAYS_S))
+
+    with caplog.at_level(logging.ERROR):
+        await run_send()
+
+    assert spring.sizes("/daily-battles/problem") == [1] * (
+        1 + len(SEND_RETRY_DELAYS_S)
+    )
+    assert buffer.sent == []
+    assert "배틀 전송 실패(장애 지속)" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_battle_mark_failure_after_save_is_logged(buffer, spring, caplog) -> None:
+    (battle,) = buffer.add_battle(1)
+    buffer.mark_error = OSError("DB 연결 끊김")
+
+    with caplog.at_level(logging.ERROR):
+        await run_send()
+
+    assert spring.sizes("/daily-battles/problem") == [1]
+    assert "중복 전송될 수 있음" in caplog.text
+    assert str(buffer.id_of(battle)) in caplog.text
 
 
 # ── 일반 문제 ──────────────────────────────────────────────────────────
@@ -343,11 +456,35 @@ async def test_another_instance_holding_the_lock_sends_nothing(
 
     monkeypatch.setattr(module, "try_advisory_lock", held)
     buffer.add(DAILY, DAILY_COUNT)
+    buffer.add_battle(1)
     buffer.add(NORMAL, 3)
 
     await run_send()
 
     assert spring.requests == []
+
+
+@pytest.mark.asyncio
+async def test_steps_send_daily_then_battle_then_normal(buffer, spring) -> None:
+    """일반 문제는 장애 재시도로 오래 걸릴 수 있다. 데일리·배틀이 밀리면 안 된다."""
+    buffer.add(NORMAL, 3)
+    buffer.add_battle(1)
+    buffer.add(DAILY, DAILY_COUNT)
+
+    await run_send()
+
+    assert spring.paths() == ["/daily-problems", "/daily-battles/problem", "/problems"]
+
+
+@pytest.mark.asyncio
+async def test_only_sends_the_chosen_step(buffer, spring) -> None:
+    buffer.add(DAILY, DAILY_COUNT)
+    (battle,) = buffer.add_battle(1)
+    buffer.add(NORMAL, 3)
+
+    await run_send(only="battle")
+
+    assert spring.requests == [("/daily-battles/problem", [battle])]
 
 
 @pytest.mark.asyncio

@@ -1,21 +1,23 @@
 """새벽 문제 생성 배치.
 
-01:00에 돈다. 조합(카테고리, 난이도)마다 아직 아무도 풀지 않은 문제가
-TARGET_STOCK개가 되도록 부족한 만큼 만든다. 만든 문제는 finalize가
-버퍼에 쌓고, 03:00 전송 배치가 Spring으로 보낸다.
+01:00에 돈다. 데일리 5개, 배틀 1개를 만들고, 조합(카테고리, 난이도)마다
+아직 아무도 풀지 않은 문제가 TARGET_STOCK개가 되도록 부족한 만큼 만든다.
+만든 문제는 finalize가 버퍼에 쌓고, 03:00 전송 배치가 Spring으로 보낸다.
 """
 
 import asyncio
 import logging
 import time
 from collections import Counter
+from collections.abc import Awaitable, Callable
 
 from src.client.backend import get_problem_demands
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, LockKey, ProblemPurpose, Trigger
 from src.db.lock import try_advisory_lock
-from src.db.repository import GeneratedProblemRepository
+from src.db.repository import BattleProblemRepository, GeneratedProblemRepository
 from src.db.session import session_scope
+from src.problem.battle.runner import run_battle_graph
 from src.problem.daily import DAILY_COUNT, generate_daily_problems
 from src.problem.runner import run_problem_graph
 from src.schema.batch import ProblemDemand
@@ -29,6 +31,7 @@ MAX_ATTEMPTS = 3  # 슬롯 하나에 그래프를 돌리는 최대 횟수
 DEMAND_RETRY_DELAYS_S = (30, 60)
 
 type ProblemKey = tuple[Category, Difficulty]
+type Step = Callable[[], Awaitable[None]]
 
 # Spring은 재고가 0인 조합을 응답에서 뺄 수 있다.
 # 그래서 응답이 아니라 이 목록을 기준으로 채운다.
@@ -164,6 +167,34 @@ async def generate_daily() -> None:
     logger.info("데일리 생성 끝: %d/%d개", len(problems), DAILY_COUNT)
 
 
+async def load_battle_pending() -> int:
+    """배치로 만들고 아직 보내지 않은 배틀 문제 수."""
+    async with session_scope() as session:
+        return await BattleProblemRepository(session).count_pending()
+
+
+async def generate_battle() -> None:
+    """
+    배틀 문제를 하나 만든다. 폐기되면 MAX_ATTEMPTS번까지 다시 만든다.
+
+    Spring은 하루에 한 문제를 받아 그날의 배틀로 쓴다. 전송에 실패해 남은
+    문제가 있으면 그 문제가 다음 날 나가므로 새로 만들지 않는다.
+    """
+    pending = await load_battle_pending()
+    if pending:
+        logger.info("미전송 배틀 %d개가 남아 있어 새로 만들지 않음", pending)
+        return
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        problem = await run_battle_graph(trigger=Trigger.BATCH)
+        if problem is not None:
+            logger.info(
+                "배틀 생성 끝: %s (%d번째 시도)", problem.problem_title, attempt
+            )
+            return
+    logger.warning("배틀 문제를 %d번 시도했지만 만들지 못함", MAX_ATTEMPTS)
+
+
 async def generate_normal() -> None:
     """조합별 재고가 TARGET_STOCK이 되도록 일반 문제를 만든다."""
     demands = await fetch_demands()
@@ -209,21 +240,33 @@ async def generate_normal() -> None:
         )
 
 
-async def run_generate() -> None:
+# 이름은 수동 실행(--only)에서 고를 때 쓴다. 순서가 곧 실행 순서다.
+# 데일리·배틀은 Spring 조회가 필요 없고 금방 끝나서 일반 문제보다 먼저 돌린다.
+GENERATE_STEPS: dict[str, Step] = {
+    "daily": generate_daily,
+    "battle": generate_battle,
+    "normal": generate_normal,
+}
+
+
+async def run_generate(only: str | None = None) -> None:
     """
     01:00 생성 배치. 스케줄러가 부른다.
 
     예외를 올리지 않는다. 스케줄러는 결과를 보지 않으므로 로그로 남긴다.
-    데일리가 실패해도 일반 문제는 만든다. 데일리는 Spring 조회가 필요 없어
-    먼저 돌린다.
+    한 단계가 실패해도 다음 단계는 돈다.
+
+    Parameters:
+        only (str | None): 이 단계만 돌린다. 수동 실행에서 쓴다. 없으면 전부
     """
+    steps = [step for name, step in GENERATE_STEPS.items() if only in (None, name)]
     try:
         async with try_advisory_lock(LockKey.BATCH_GENERATE) as acquired:
             if not acquired:
                 logger.info("다른 인스턴스가 생성 배치를 실행 중이라 건너뜀")
                 return
 
-            for step in (generate_daily, generate_normal):
+            for step in steps:
                 try:
                     await step()
                 except Exception:

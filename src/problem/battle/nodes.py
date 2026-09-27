@@ -284,6 +284,7 @@ async def finalize(state: BattleState) -> dict:
                 problem_title=state.problem_title,
                 problem_content=state.problem_content,
                 test_cases=[case.model_dump(mode="json") for case in state.test_cases],
+                trigger=state.trigger,
             )
             problem_id = row.id
 
@@ -300,9 +301,10 @@ async def finalize(state: BattleState) -> dict:
         raise ProblemSaveError(f"배틀 문제 저장 실패: {error}") from error
 
     logger.info(
-        "배틀 문제 저장: %s / %s / %s",
+        "배틀 문제 저장: %s / %s / %s (%s)",
         problem_id,
         state.category.value,
         state.problem_title,
+        state.trigger.value,
     )
     return {}
