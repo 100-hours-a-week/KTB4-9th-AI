@@ -107,5 +107,5 @@ class DailyProblemResponse(BaseResponse):
     problems: list[Problem] = Field(default_factory=list)
 
 
-class BattleProblemResponse(BaseResponse):
-    battle_problem: BattleProblem
+class BattleProblemResponse(BaseResponse, BattleProblem):
+    pass
