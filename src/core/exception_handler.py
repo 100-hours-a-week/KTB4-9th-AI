@@ -1,3 +1,4 @@
+import json
 import logging
 
 from fastapi import FastAPI, Request
@@ -19,6 +20,30 @@ _FIELD_ERROR_CODES = {
     "requested_category": ErrorCode.INVALID_CATEGORY,
     "language": ErrorCode.UNSUPPORTED_LANGUAGE,
 }
+
+# 긴 본문(자연어 풀이 등)이 로그 한 줄을 덮지 않게 자른다
+_LOG_BODY_LIMIT = 2000
+_LOG_INPUT_LIMIT = 200
+
+
+def _preview(value: object, limit: int) -> str:
+    """로그에 남길 값을 한 줄 문자열로 줄인다."""
+    if isinstance(value, bytes):
+        value = value.decode(errors="replace")
+    if isinstance(value, str):
+        text = value
+    else:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}...(총 {len(text)}자)"
+
+
+def _describe(error: dict) -> str:
+    """검증 오류 하나를 `body.difficulty [enum] 메시지 (입력: ...)` 형태로 적는다."""
+    location = ".".join(str(part) for part in error.get("loc", ()))
+    received = _preview(error.get("input"), _LOG_INPUT_LIMIT)
+    return f"{location} [{error.get('type')}] {error.get('msg')} (입력: {received})"
 
 
 def _body(message: str, code: ErrorCode | None) -> dict:
@@ -42,7 +67,11 @@ def _resolve_error_code(error: dict) -> ErrorCode:
 
 async def handle_cosmos_error(request: Request, exc: CosmosError) -> JSONResponse:
     logger.warning(
-        "%s: %s", type(exc).__name__, exc.message, extra={"path": request.url.path}
+        "%s %s → %s: %s",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+        exc.message,
     )
     return JSONResponse(status_code=exc.status, content=_body(exc.message, exc.code))
 
@@ -54,10 +83,14 @@ async def handle_validation_error(
     first = errors[0] if errors else {}
     code = _resolve_error_code(first)
     message = first.get("msg", "요청 형식이 올바르지 않습니다")
-    logger.info(
-        "요청 검증 실패: %s",
-        message,
-        extra={"path": request.url.path, "loc": str(first.get("loc", ""))},
+    # 포매터가 extra를 출력하지 않으므로 필요한 정보는 모두 메시지에 넣는다
+    logger.warning(
+        "요청 검증 실패 %s %s (Content-Type: %s)\n  오류: %s\n  본문: %s",
+        request.method,
+        request.url.path,
+        request.headers.get("content-type"),
+        "\n        ".join(_describe(error) for error in errors),
+        _preview(exc.body, _LOG_BODY_LIMIT),
     )
     return JSONResponse(status_code=422, content=_body(message, code))
 
@@ -81,7 +114,11 @@ async def handle_http_exception(
 async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
     """예상하지 못한 예외. 원인 추적이 필요하므로 스택을 남긴다."""
     logger.error(
-        "처리되지 않은 예외: %s", exc, exc_info=True, extra={"path": request.url.path}
+        "처리되지 않은 예외 %s %s: %s",
+        request.method,
+        request.url.path,
+        exc,
+        exc_info=True,
     )
     return JSONResponse(
         status_code=500,
