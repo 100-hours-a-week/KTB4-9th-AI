@@ -6,8 +6,8 @@ from src.core.exception import LLMOutputParseError
 from src.problem.render import render_problem
 from src.problem.state import GraphState
 
-MODEL_NAME = "gemini-3.7-flash"
-PROMPT_VERSION = "generate_ref_code/v3"
+MODEL_NAME = "gemini-3.8-flash"
+PROMPT_VERSION = "generate_ref_code/v4"
 REFERENCE_LANGUAGE = Language.PYTHON
 # 채점 서버(judge0 language_id 71)의 파이썬 버전. 서버를 올리면 같이 바꾼다.
 REFERENCE_RUNTIME = "Python 3.8"

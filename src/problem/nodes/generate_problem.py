@@ -16,8 +16,8 @@ from src.problem.state import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.5-flash-lite"
-PROMPT_VERSION = "generate_problem/v4"
+MODEL_NAME = "gemini-3.8-flash"
+PROMPT_VERSION = "generate_problem/v6"
 
 GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 
@@ -40,8 +40,11 @@ GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 - 값들이 서로 달라야 하면 special_conditions에 "서로 다른 값"이라고 적는다.
 - execution_limits는 {languages} 네 언어를 모두 적는다.
 - category_select_reason에는 이 카테고리로 판단한 근거를 한 문장으로 적는다.
-- algorithm_core에는 입출력 형식과 이야기 설정을 빼고,
-  어떤 자료구조·알고리즘으로 무엇을 계산하는지 한 문장으로 적는다.
+- algorithm_core에는 이야기 설정을 빼고, 이 문제만의 조건과 계산 대상을
+  한 문장으로 적는다. 자료구조·알고리즘 이름만 적지 않는다.
+  같은 알고리즘을 쓰는 다른 문제와 구분되는 조건을 반드시 포함한다.
+  나쁜 예: "BFS로 최단 거리를 구한다"
+  좋은 예: "벽을 최대 한 번 부술 수 있다는 조건에서 BFS로 최단 거리를 구한다"
 """
 
 RESPONSE_CATEGORIES = [c for c in Category if c != Category.RANDOM]
