@@ -7,12 +7,12 @@
 빠뜨리면 테스트가 실제 API를 때리거나 개발용 DB에 쓰레기 행을 쌓는다.
 """
 
-from src.enum import ConstraintDataType, ConstraintScope, Language
+from src.client.llm import LLMConfig
+from src.core.enums import ConstraintDataType, ConstraintScope, Language
 from src.problem.state import (
     ExecutionLimit,
     GraphState,
     InputConstraint,
-    LLMConfig,
     ProblemExample,
 )
 
@@ -55,7 +55,7 @@ async def generate_problem(state: GraphState) -> dict:
 
 async def check_duplicate(state: GraphState) -> dict:
     """항상 신규로 판정한다."""
-    return {"is_duplicated": False}
+    return {}
 
 
 async def generate_ref_code(state: GraphState) -> dict:

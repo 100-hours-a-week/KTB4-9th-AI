@@ -2,9 +2,9 @@ import pytest
 from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel
 
-from src.problem.state import LLMConfig
-from src.shared import llm as module
-from src.shared.llm import LLMOutputParseError, call_llm_structured, strip_code_fence
+from src.client import llm as module
+from src.client.llm import LLMConfig, call_llm_structured, strip_code_fence
+from src.core.exception import LLMOutputParseError
 
 
 class Score(BaseModel):

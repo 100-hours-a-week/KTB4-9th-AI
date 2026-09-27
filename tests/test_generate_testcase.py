@@ -2,7 +2,8 @@ from collections.abc import Callable
 
 import pytest
 
-from src.enum import DiscardReason, ExecutionStatus, Language
+from src.client.judge0 import RunResult
+from src.core.enums import DiscardReason, ExecutionStatus, Language
 from src.problem.nodes import generate_testcase as module
 from src.problem.nodes.generate_testcase import (
     MAX_REPORTED_FAILURES,
@@ -18,7 +19,6 @@ from src.problem.state import (
     GraphState,
     ProblemExample,
 )
-from src.shared.code_runner import RunResult
 from tests import fake_nodes
 
 # 첫 줄의 두 수를 더해 출력하는, 실제로 도는 레퍼런스 코드
@@ -38,7 +38,7 @@ async def make_state(**updates) -> GraphState:
 
 
 def succeeded(stdout: str) -> RunResult:
-    return RunResult(status=ExecutionStatus.SUCCEEDED, stdout=stdout, exit_code=0)
+    return RunResult(status=ExecutionStatus.SUCCEEDED, stdout=stdout)
 
 
 def fix_run_code(
@@ -169,9 +169,9 @@ async def test_node_runs_the_reference_once_per_input(
 
 @pytest.mark.asyncio
 async def test_node_runs_the_real_reference_code(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, judge0_available: None
 ) -> None:
-    """실행기를 바꿔 끼우지 않고 끝까지 돌려 본다."""
+    """실행기를 바꿔 끼우지 않고 judge0까지 끝까지 돌려 본다."""
     fix_structured_response(monkeypatch, many_inputs())
 
     result = await generate_testcase(await make_state())

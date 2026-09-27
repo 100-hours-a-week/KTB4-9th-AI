@@ -1,10 +1,10 @@
 import pytest
 
-from src.enum import Language
+from src.core.enums import Language
+from src.core.exception import LLMOutputParseError
 from src.problem.nodes import generate_ref_code as module
 from src.problem.nodes.generate_ref_code import ReferenceCode, generate_ref_code
 from src.problem.state import GraphState
-from src.shared.llm import LLMOutputParseError
 from tests import fake_nodes
 
 
@@ -66,3 +66,12 @@ async def test_프롬프트에_카테고리를_넣지_않는다(monkeypatch):
     assert state.problem_title in prompts[0]
     assert state.category_select_reason not in prompts[0]
     assert "카테고리:" not in prompts[0]
+
+
+@pytest.mark.asyncio
+async def test_프롬프트에_채점_서버의_파이썬_버전을_알린다(monkeypatch):
+    prompts = fix_structured_response(monkeypatch, "print(2)")
+    await generate_ref_code(await make_state())
+
+    assert f"{module.REFERENCE_RUNTIME}에서 실행된다" in prompts[0]
+    assert "타입 힌트는 쓰지 않는다" in prompts[0]

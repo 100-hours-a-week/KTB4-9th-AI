@@ -7,21 +7,17 @@
 import logging
 import uuid
 
-from src.core.exception import CosmosError
-from src.problem.state import GraphState
-from src.schema import Problem
-from src.shared.db_client import session_scope
-from src.shared.embedding import EMBEDDING_MODEL
-from src.shared.repository import (
+from src.client.embedding import EMBEDDING_MODEL
+from src.core.exception import ProblemSaveError
+from src.db.repository import (
     GeneratedProblemRepository,
     ProblemEmbeddingRepository,
 )
+from src.db.session import session_scope
+from src.problem.state import GraphState
+from src.schema.problem import Problem
 
 logger = logging.getLogger(__name__)
-
-
-class ProblemSaveError(CosmosError):
-    """확정된 문제를 저장할 수 없다."""
 
 
 def build_problem(state: GraphState) -> Problem:
@@ -103,7 +99,9 @@ async def finalize(state: GraphState) -> dict:
 
     try:
         async with session_scope() as session:
-            row = await GeneratedProblemRepository(session).add(problem)
+            row = await GeneratedProblemRepository(session).add(
+                problem, trigger=state.trigger, purpose=state.purpose
+            )
             problem_id = row.id
             await index_embedding(session, problem_id, state, problem)
     except Exception as error:
@@ -111,9 +109,11 @@ async def finalize(state: GraphState) -> dict:
         raise ProblemSaveError(f"문제 저장 실패: {error}") from error
 
     logger.info(
-        "문제 저장: %s / %s / %s",
+        "문제 저장: %s / %s / %s (%s/%s)",
         problem_id,
         problem.category.value,
         problem.difficulty.value,
+        state.trigger.value,
+        state.purpose.value,
     )
     return {"problem_id": problem_id}

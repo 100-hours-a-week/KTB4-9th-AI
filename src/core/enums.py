@@ -1,4 +1,4 @@
-from enum import StrEnum
+from enum import IntEnum, StrEnum
 
 
 class Difficulty(StrEnum):
@@ -10,8 +10,24 @@ class Difficulty(StrEnum):
 
 
 class Trigger(StrEnum):
+    """문제를 만든 경로. BATCH로 만든 문제만 새벽 전송 대상이다."""
+
     BATCH = "BATCH"
-    ON_DEMAND = "ON_DEMAND"
+    ON_DEMAND = "ON_DEMAND"  # API 응답으로 이미 Spring에 나감
+
+
+class ProblemPurpose(StrEnum):
+    """문제 용도. 전송할 Spring 엔드포인트가 이것으로 갈린다."""
+
+    NORMAL = "NORMAL"  # POST /problems
+    DAILY = "DAILY"  # POST /daily-problems
+
+
+class LockKey(IntEnum):
+    """Postgres advisory lock 키. DB 전체에서 하나의 이름공간이라 한곳에 모은다."""
+
+    BATCH_GENERATE = 1001
+    BATCH_SEND = 1002  # 생성과 키가 달라야 생성 중에도 3시 전송이 돈다
 
 
 class Language(StrEnum):
@@ -71,10 +87,7 @@ class ExecutionStatus(StrEnum):
     TIMED_OUT = "TIMED_OUT"  # 실행 제한 시간 초과
     RUNTIME_ERROR = "RUNTIME_ERROR"  # 0이 아닌 코드로 종료, 시그널로 죽음
     COMPILE_ERROR = "COMPILE_ERROR"  # 컴파일 실패 (컴파일 언어용)
-    MEMORY_EXCEEDED = "MEMORY_EXCEEDED"  # 메모리 제한 초과
-    OUTPUT_EXCEEDED = "OUTPUT_EXCEEDED"  # 출력이 상한을 넘음
-    UNSUPPORTED_LANGUAGE = "UNSUPPORTED_LANGUAGE"  # 실행기가 지원하지 않는 언어
-    INTERNAL_ERROR = "INTERNAL_ERROR"  # 실행기 자체의 실패
+    INTERNAL_ERROR = "INTERNAL_ERROR"  # 채점 서버 장애 또는 알 수 없는 상태
 
 
 class DiscardReason(StrEnum):
@@ -99,6 +112,7 @@ class DiscardReason(StrEnum):
 
     # 공통
     LLM_ERROR = "LLM_ERROR"  # LLM 호출 또는 구조화 응답 해석 실패
+    VALIDATION_FAILED = "VALIDATION_FAILED"  # 길이·개수 등 명세 제약 위반
 
 
 class SeedSource(StrEnum):

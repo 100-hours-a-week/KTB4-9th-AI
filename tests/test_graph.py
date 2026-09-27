@@ -1,6 +1,6 @@
 import pytest
 
-from src.enum import Difficulty, DiscardReason
+from src.core.enums import Difficulty, DiscardReason, ProblemPurpose, Trigger
 from src.problem.graph import PARALLEL_NODES, build_graph
 from src.problem.state import (
     GraphState,
@@ -51,10 +51,7 @@ async def test_정적검증_실패면_폐기로_끝나고_병렬_노드는_안_�
 @pytest.mark.asyncio
 async def test_중복이면_폐기로_끝난다():
     async def always_duplicate(state: GraphState) -> dict:
-        return {
-            "is_duplicated": True,
-            **discard(DiscardReason.DUPLICATE, "유사 문제 존재"),
-        }
+        return discard(DiscardReason.DUPLICATE, "유사 문제 존재")
 
     state = await run({"check_duplicate": always_duplicate})
 
@@ -168,3 +165,21 @@ def test_keep_discard_flag_never_unsets() -> None:
 def test_keep_first_discard_keeps_the_earlier_value() -> None:
     assert keep_first_discard("먼저", "나중") == "먼저"
     assert keep_first_discard(None, "나중") == "나중"
+
+
+@pytest.mark.asyncio
+async def test_생성_경로와_용도가_finalize까지_전달된다():
+    """노드는 이 값을 쓰지 않지만, finalize가 받지 못하면 전송 대상이 틀어진다."""
+    seen: list[GraphState] = []
+
+    async def capture(state: GraphState) -> dict:
+        seen.append(state)
+        return {}
+
+    graph = build_graph({**OFFLINE_NODES, "finalize": capture})
+    await graph.ainvoke(
+        GraphState(**INPUT, trigger=Trigger.BATCH, purpose=ProblemPurpose.DAILY)
+    )
+
+    assert seen[0].trigger is Trigger.BATCH
+    assert seen[0].purpose is ProblemPurpose.DAILY

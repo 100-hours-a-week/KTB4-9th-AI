@@ -32,6 +32,12 @@ class Settings(BaseSettings):
 
     backend_url: str = "http://localhost:8080"
 
+    judge0_url: str = "http://localhost:2358"
+
+    batch_enabled: bool = False
+    batch_timezone: str = "Asia/Seoul"
+    batch_concurrency: int = 5
+
     log_level: str = "INFO"
 
 

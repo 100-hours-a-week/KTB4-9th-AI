@@ -1,6 +1,6 @@
 import re
 
-from src.enum import ConstraintDataType, ConstraintScope, DiscardReason, Language
+from src.core.enums import ConstraintDataType, ConstraintScope, DiscardReason, Language
 from src.problem.render import format_number
 from src.problem.state import GraphState, discard
 

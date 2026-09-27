@@ -3,12 +3,15 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from src.enum import (
+from src.client.llm import LLMConfig
+from src.core.enums import (
     ConstraintDataType,
     ConstraintScope,
     Difficulty,
     DiscardReason,
     Language,
+    ProblemPurpose,
+    Trigger,
 )
 
 HIDDEN_TEST_CASE_COUNT = 7  # 문제당 보관할 비공개 테스트 케이스 수
@@ -60,14 +63,6 @@ class SolutionCode(BaseModel):
     content: str | None = None
 
 
-class LLMConfig(BaseModel):
-    model_name: str | None = None
-    model_version: str | None = None
-    prompt_version: str | None = None
-    temperature: float | None = None
-    top_k: int | None = 3
-
-
 def find_limit(
     limits: list[ExecutionLimit], language: Language
 ) -> ExecutionLimit | None:
@@ -113,6 +108,9 @@ class GraphState(BaseModel):
     # ---- input
     requested_difficulty: Difficulty
     requested_category: str
+    # 노드는 읽지 않는다. finalize가 저장할 때 전송 대상을 가르는 데만 쓴다.
+    trigger: Trigger = Trigger.ON_DEMAND
+    purpose: ProblemPurpose = ProblemPurpose.NORMAL
 
     # ---- problem
     difficulty: Difficulty | None = None
@@ -140,7 +138,6 @@ class GraphState(BaseModel):
     is_statically_validated: bool = False
 
     # ---- 중복 검사
-    is_duplicated: bool = False
     algorithm_core: str | None = None
     # check_duplicate가 만들어 finalize가 색인에 다시 쓴다. 두 번 부르지 않는다.
     algorithm_core_embedding: list[float] | None = None

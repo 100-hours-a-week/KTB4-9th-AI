@@ -2,7 +2,7 @@ import contextlib
 
 import pytest
 
-from src.enum import Category, DiscardReason
+from src.core.enums import Category, DiscardReason
 from src.problem.nodes import discard_problem as module
 from src.problem.nodes.discard_problem import build_discard_record, discard_problem
 from src.problem.state import GraphState

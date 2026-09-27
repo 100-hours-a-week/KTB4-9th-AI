@@ -1,6 +1,8 @@
 import pytest
 
-from src.enum import DiscardReason, Language
+from src.client.llm import LLMConfig
+from src.core.enums import DiscardReason, Language
+from src.core.exception import LLMOutputParseError
 from src.problem.nodes import generate_solution_code as module
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.nodes.generate_solution_code import (
@@ -11,8 +13,7 @@ from src.problem.nodes.generate_solution_code import (
     generate_solution_code,
     solve_language,
 )
-from src.problem.state import GraphState, LLMConfig
-from src.shared.llm import LLMOutputParseError
+from src.problem.state import GraphState
 from tests import fake_nodes
 
 REFERENCE_CODE = "import sys\nprint(2)"

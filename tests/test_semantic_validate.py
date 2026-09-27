@@ -1,6 +1,7 @@
 import pytest
 
-from src.enum import DiscardReason, ExecutionStatus, Language
+from src.client.judge0 import RunResult
+from src.core.enums import DiscardReason, ExecutionStatus, Language
 from src.problem.nodes import semantic_validate as module
 from src.problem.nodes.semantic_validate import (
     LogicVerdict,
@@ -10,7 +11,6 @@ from src.problem.nodes.semantic_validate import (
     semantic_validate,
 )
 from src.problem.state import GraphState, ProblemExample, find_limit
-from src.shared.code_runner import RunResult
 from tests import fake_nodes
 from tests.fake_nodes import offline_except
 
@@ -60,7 +60,7 @@ def fix_run(monkeypatch: pytest.MonkeyPatch, result: RunResult) -> list[str]:
 
 
 def succeeded(stdout: str) -> RunResult:
-    return RunResult(status=ExecutionStatus.SUCCEEDED, stdout=stdout, exit_code=0)
+    return RunResult(status=ExecutionStatus.SUCCEEDED, stdout=stdout)
 
 
 # ── 출력 비교 ──────────────────────────────────────────────────────────
@@ -194,9 +194,9 @@ async def test_matching_examples_pass(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_real_reference_code_reproduces_the_example(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, judge0_available: None
 ) -> None:
-    """실행기를 바꿔 끼우지 않고 끝까지 돌려 본다."""
+    """실행기를 바꿔 끼우지 않고 judge0까지 끝까지 돌려 본다."""
     fix_verdict(monkeypatch, "none")
 
     result = await semantic_validate(await make_state())

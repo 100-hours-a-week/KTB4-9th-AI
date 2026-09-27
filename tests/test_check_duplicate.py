@@ -3,7 +3,9 @@ import uuid
 
 import pytest
 
-from src.enum import Category, DiscardReason
+from src.core.constants import EMBEDDING_DIM
+from src.core.enums import Category, DiscardReason
+from src.db.repository import SimilarProblem
 from src.problem.nodes import check_duplicate as module
 from src.problem.nodes.check_duplicate import (
     DUPLICATE_SIMILARITY,
@@ -11,8 +13,6 @@ from src.problem.nodes.check_duplicate import (
     check_duplicate,
 )
 from src.problem.state import GraphState
-from src.shared.model import EMBEDDING_DIM
-from src.shared.repository import SimilarProblem
 from tests import fake_nodes
 
 ALGORITHM_CORE = "해시맵으로 M - x의 등장 횟수를 누적해 합이 M인 쌍의 수를 센다"
@@ -81,7 +81,7 @@ async def test_empty_table_means_new(monkeypatch: pytest.MonkeyPatch) -> None:
 
     result = await check_duplicate(await make_state())
 
-    assert result["is_duplicated"] is False
+    assert result["algorithm_core_embedding"] == VECTOR
     assert "is_discarded" not in result
 
 
@@ -105,7 +105,7 @@ async def test_similarity_just_below_the_threshold_is_new(
 
     result = await check_duplicate(await make_state())
 
-    assert result["is_duplicated"] is False
+    assert "is_discarded" not in result
 
 
 @pytest.mark.asyncio

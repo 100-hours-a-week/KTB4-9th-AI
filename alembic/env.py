@@ -7,10 +7,10 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from src.shared.config import get_settings
+from src.core.config import get_settings
 
 # 모든 모델을 import 해야 Base.metadata 에 테이블이 등록된다.
-from src.shared.model import Base  # noqa: F401
+from src.db.models import Base  # noqa: F401
 
 config = context.config
 

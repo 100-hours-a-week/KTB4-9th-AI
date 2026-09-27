@@ -4,13 +4,19 @@ from enum import StrEnum
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, and_, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from src.enum import Category, Difficulty, DiscardReason, SeedSource
-
-EMBEDDING_DIM = 768
+from src.core.constants import EMBEDDING_DIM
+from src.core.enums import (
+    Category,
+    Difficulty,
+    DiscardReason,
+    ProblemPurpose,
+    SeedSource,
+    Trigger,
+)
 
 # JSONB 컬럼 규칙: Pydantic 스키마의 model_dump(mode="json") 결과(snake_case)그대로 저장
 JsonList = list[dict[str, Any]]
@@ -36,6 +42,7 @@ class GeneratedProblem(Base):
     """Spring 전송 대기 버퍼. 전송 후에도 문제 전문을 보관한다.
 
     컬럼 구성은 스키마의 Problem과 1:1로 맞춘다.
+    trigger·purpose는 전송 대상을 고르는 관리용이라 Problem에 없다.
     """
 
     __tablename__ = "generated_problems"
@@ -66,18 +73,28 @@ class GeneratedProblem(Base):
     hint_comments: Mapped[JsonList] = mapped_column(JSONB)  # list[HintComment]
     solution_keywords: Mapped[list[str]] = mapped_column(JSONB)  # 채점 키워드
 
+    # 새벽 전송은 trigger=BATCH만 보내고, purpose로 엔드포인트를 고른다.
+    trigger: Mapped[Trigger] = mapped_column(
+        _enum_col(Trigger), server_default=Trigger.ON_DEMAND.value
+    )
+    purpose: Mapped[ProblemPurpose] = mapped_column(
+        _enum_col(ProblemPurpose), server_default=ProblemPurpose.NORMAL.value
+    )
+
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
     __table_args__ = (
-        # 미전송 재고 조회용 부분 인덱스
+        # 배치 미전송 재고 조회용 부분 인덱스.
+        # ON_DEMAND 행은 sent_at이 영영 비어 있으므로 인덱스에서 뺀다.
         Index(
             "ix_generated_problems_pending",
+            "purpose",
             "category",
             "difficulty",
-            postgresql_where=sent_at.is_(None),
+            postgresql_where=and_(sent_at.is_(None), trigger == Trigger.BATCH),
         ),
     )
 
@@ -177,4 +194,45 @@ class FewshotSeed(Base):
 
     __table_args__ = (
         Index("ix_fewshot_lookup", "category", "difficulty", "is_active"),
+    )
+
+
+# ── 5. Battle ───────────────────────────────────────────────────
+
+
+class BattleProblem(Base):
+    """배틀 문제. 하루 한 번 생성하며 일반 문제와 분리해 보관한다."""
+
+    __tablename__ = "battle_problems"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+
+    category: Mapped[Category] = mapped_column(_enum_col(Category), index=True)
+
+    problem_title: Mapped[str] = mapped_column(String(255))
+    problem_content: Mapped[str] = mapped_column(Text)
+    test_cases: Mapped[JsonList] = mapped_column(JSONB)  # list[HiddenTestCase]
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class BattleProblemEmbedding(Base):
+    """배틀 문제 중복 검사용. 배틀끼리만 비교한다."""
+
+    __tablename__ = "battle_problem_embeddings"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    battle_problem_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("battle_problems.id", ondelete="CASCADE"), unique=True
+    )
+
+    category: Mapped[Category] = mapped_column(_enum_col(Category), index=True)
+    algorithm_core: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
+    embedding_model: Mapped[str] = mapped_column(String(128))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
