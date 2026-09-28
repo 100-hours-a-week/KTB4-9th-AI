@@ -1,7 +1,7 @@
 """새벽 문제 전송 배치.
 
 03:00에 돈다. 생성 배치가 버퍼에 쌓아 둔 문제를 Spring으로 보낸다.
-데일리를 먼저 보내고, 일반 문제는 청크로 나눠 보낸다.
+데일리, 배틀을 먼저 보내고, 일반 문제는 청크로 나눠 보낸다.
 
 DB 트랜잭션을 연 채로 HTTP를 보내지 않는다. 일시 장애면 20분 넘게
 재시도할 수 있어서, 청크를 짧게 읽고 → 보내고 → 성공하자마자 표시한다.
@@ -14,13 +14,13 @@ from collections.abc import Awaitable, Callable, Collection
 
 import httpx
 
-from src.client.backend import save_daily_problems, save_problems
+from src.client.backend import save_battle_problem, save_daily_problems, save_problems
 from src.core.enums import LockKey, ProblemPurpose
 from src.db.lock import try_advisory_lock
-from src.db.repository import GeneratedProblemRepository
+from src.db.repository import BattleProblemRepository, GeneratedProblemRepository
 from src.db.session import session_scope
 from src.problem.daily import DAILY_COUNT
-from src.schema.problem import Problem
+from src.schema.problem import BattleProblem, Problem
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ TRANSIENT_CLIENT_ERRORS = {408, 429}
 
 type Chunk = list[tuple[uuid.UUID, Problem]]
 type Sender = Callable[[list[Problem]], Awaitable[None]]
+type Step = Callable[[], Awaitable[None]]
 
 
 def is_rejection(error: Exception) -> bool:
@@ -51,16 +52,20 @@ def _reason(error: httpx.HTTPError) -> str:
     return repr(error)
 
 
-async def send_with_retry(send: Sender, problems: list[Problem]) -> None:
+async def send_with_retry[T](send: Callable[[T], Awaitable[None]], payload: T) -> None:
     """
     보낸다. 일시 장애면 SEND_RETRY_DELAYS_S 간격으로 다시 보낸다.
+
+    Parameters:
+        send: Spring 저장 요청 함수
+        payload (T): 보낼 것. 일반·데일리는 문제 목록, 배틀은 문제 하나
 
     Raises:
         httpx.HTTPError: 거부된 경우(바로), 재시도해도 실패한 경우
     """
     for attempt, delay in enumerate((*SEND_RETRY_DELAYS_S, None), start=1):
         try:
-            await send(problems)
+            await send(payload)
             return
         except httpx.HTTPError as error:
             if is_rejection(error) or delay is None:
@@ -191,6 +196,55 @@ async def send_daily() -> None:
     logger.info("데일리 전송 끝: %d개", len(chunk))
 
 
+async def load_battle() -> tuple[uuid.UUID, BattleProblem] | None:
+    """가장 오래된 미전송 배틀 문제를 읽는다. 없으면 None."""
+    async with session_scope() as session:
+        rows = await BattleProblemRepository(session).list_pending(limit=1)
+        if not rows:
+            return None
+        return rows[0].id, BattleProblem.model_validate(rows[0], from_attributes=True)
+
+
+async def mark_battle_sent(problem_id: uuid.UUID) -> None:
+    async with session_scope() as session:
+        await BattleProblemRepository(session).mark_sent([problem_id])
+
+
+async def send_battle() -> None:
+    """
+    가장 오래된 배틀 문제 하나를 보낸다.
+
+    Spring은 하루에 한 문제를 받아 그날의 배틀로 쓴다. 실패하면 남기고,
+    다음 날 생성은 남은 문제가 있어 건너뛰므로 다음 날 3시에 이 문제가 나간다.
+    """
+    loaded = await load_battle()
+    if loaded is None:
+        logger.warning("보낼 배틀 문제가 없음")
+        return
+    problem_id, problem = loaded
+
+    try:
+        await send_with_retry(save_battle_problem, problem)
+    except httpx.HTTPError as error:
+        logger.error(
+            "배틀 전송 실패(%s). 남기고 다음 날 다시 보낸다: %s, id=%s",
+            "거부" if is_rejection(error) else "장애 지속",
+            _reason(error),
+            problem_id,
+        )
+        return
+
+    try:
+        await mark_battle_sent(problem_id)
+    except Exception:
+        logger.error(
+            "Spring 저장은 됐지만 전송 표시에 실패함. 다음 날 중복 전송될 수 있음: %s",
+            problem_id,
+        )
+        raise
+    logger.info("배틀 전송 끝: %s", problem.problem_title)
+
+
 async def send_normal() -> None:
     """미전송 일반 문제가 없을 때까지 청크로 나눠 보낸다."""
     sent = 0
@@ -216,20 +270,33 @@ async def send_normal() -> None:
         )
 
 
-async def run_send() -> None:
+# 이름은 수동 실행(--only)에서 고를 때 쓴다. 순서가 곧 실행 순서다.
+# 일반 문제는 장애가 나면 20분 넘게 재시도할 수 있어 맨 뒤에 둔다.
+SEND_STEPS: dict[str, Step] = {
+    "daily": send_daily,
+    "battle": send_battle,
+    "normal": send_normal,
+}
+
+
+async def run_send(only: str | None = None) -> None:
     """
     03:00 전송 배치. 스케줄러가 부른다.
 
     예외를 올리지 않는다. 스케줄러는 결과를 보지 않으므로 로그로 남긴다.
-    데일리가 실패해도 일반 문제는 보낸다.
+    한 단계가 실패해도 다음 단계는 보낸다.
+
+    Parameters:
+        only (str | None): 이 단계만 돌린다. 수동 실행에서 쓴다. 없으면 전부
     """
+    steps = [step for name, step in SEND_STEPS.items() if only in (None, name)]
     try:
         async with try_advisory_lock(LockKey.BATCH_SEND) as acquired:
             if not acquired:
                 logger.info("다른 인스턴스가 전송 배치를 실행 중이라 건너뜀")
                 return
 
-            for step in (send_daily, send_normal):
+            for step in steps:
                 try:
                     await step()
                 except Exception:

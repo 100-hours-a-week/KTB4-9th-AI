@@ -9,6 +9,9 @@ from src.core.enums import (
 )
 from src.problem.nodes.static_validate import static_validate
 from src.problem.state import (
+    MAX_CATEGORY_REASON_LENGTH,
+    MAX_CONTENT_LENGTH,
+    MAX_TITLE_LENGTH,
     ExecutionLimit,
     GraphState,
     InputConstraint,
@@ -20,9 +23,9 @@ def make_state(**overrides) -> GraphState:
     """정적 검증을 통과하는 기본 상태를 만들고, 필요한 필드만 바꿔 끼운다."""
     base = {
         "requested_difficulty": Difficulty.LV2,
-        "requested_category": "HASH_TABLE",
+        "requested_category": "HASH",
         "difficulty": Difficulty.LV2,
-        "category": "HASH_TABLE",
+        "category": "HASH",
         "category_select_reason": "M - x 존재 여부를 O(1)에 조회하는 것이 핵심",
         "problem_title": "합이 M인 쌍의 개수",
         "problem_content": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
@@ -119,3 +122,34 @@ async def test_서로_다른_값을_범위보다_많이_요구하면_폐기한�
     ]
     result = await static_validate(make_state(input_constraints=constraints))
     assert result["discard_reason"] == DiscardReason.CONSTRAINT_CONFLICT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "limit"),
+    [
+        ("problem_title", MAX_TITLE_LENGTH),
+        ("problem_content", MAX_CONTENT_LENGTH),
+        ("category_select_reason", MAX_CATEGORY_REASON_LENGTH),
+    ],
+)
+async def test_Spring_컬럼_길이를_넘으면_폐기한다(field, limit):
+    result = await static_validate(make_state(**{field: "가" * (limit + 1)}))
+
+    assert result["discard_reason"] == DiscardReason.VALIDATION_FAILED
+    assert f"{limit}자를 넘음" in result["discard_detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "limit"),
+    [
+        ("problem_title", MAX_TITLE_LENGTH),
+        ("problem_content", MAX_CONTENT_LENGTH),
+        ("category_select_reason", MAX_CATEGORY_REASON_LENGTH),
+    ],
+)
+async def test_Spring_컬럼_길이와_같으면_통과한다(field, limit):
+    result = await static_validate(make_state(**{field: "가" * limit}))
+
+    assert result == {"is_statically_validated": True}

@@ -20,7 +20,7 @@ REFERENCE_CODE = "print(sum(map(int, input().split())))"
 
 async def make_state(**updates) -> GraphState:
     """레퍼런스 코드까지 만들어진 상태. 공개 예시의 답은 11이다."""
-    base = GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
+    base = GraphState(requested_difficulty="LV2", requested_category="HASH")
     state = base.model_copy(update=await fake_nodes.generate_problem(base))
     return state.model_copy(
         update={
@@ -340,7 +340,7 @@ async def test_contradiction_check_costs_one_call_across_retries(
     )
     state = GraphState(
         **await graph.ainvoke(
-            GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
+            GraphState(requested_difficulty="LV2", requested_category="HASH")
         )
     )
 
@@ -374,7 +374,7 @@ async def test_contradiction_skips_the_retry_loop_entirely(
     )
     state = GraphState(
         **await graph.ainvoke(
-            GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
+            GraphState(requested_difficulty="LV2", requested_category="HASH")
         )
     )
 
