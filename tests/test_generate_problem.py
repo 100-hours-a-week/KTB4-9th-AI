@@ -34,14 +34,14 @@ VALID_PROBLEM = {
     "input_constraints": [
         {
             "target": "N",
-            "scope": "input",
-            "data_type": "int",
+            "scope": "INPUT",
+            "data_type": "INT",
             "min_value": 1,
             "max_value": 45,
             "data_count": 1,
             "special_conditions": [],
         },
-        {"target": "output", "scope": "output", "data_type": "long"},
+        {"target": "output", "scope": "OUTPUT", "data_type": "LONG"},
     ],
     "execution_limits": [
         {"language": lang.value, "time_limit_ms": 2000, "memory_limit_kb": 262144}

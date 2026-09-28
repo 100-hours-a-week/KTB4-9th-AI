@@ -31,24 +31,24 @@ class LockKey(IntEnum):
 
 
 class Language(StrEnum):
-    PYTHON = "python"
-    JAVA = "java"
-    JAVASCRIPT = "javascript"
-    CPP = "cpp"
+    PYTHON = "PYTHON"
+    JAVA = "JAVA"
+    JAVASCRIPT = "JAVASCRIPT"
+    CPP = "CPP"
 
 
 class ConstraintScope(StrEnum):
-    INPUT = "input"
-    OUTPUT = "output"
+    INPUT = "INPUT"
+    OUTPUT = "OUTPUT"
 
 
 class ConstraintDataType(StrEnum):
-    INT = "int"
-    LONG = "long"
-    DOUBLE = "double"
-    STRING = "str"
-    CHAR = "char"
-    BOOLEAN = "bool"
+    INT = "INT"
+    LONG = "LONG"
+    DOUBLE = "DOUBLE"
+    STRING = "STR"
+    CHAR = "CHAR"
+    BOOLEAN = "BOOL"
 
 
 class Category(StrEnum):
