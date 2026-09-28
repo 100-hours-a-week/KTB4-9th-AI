@@ -40,8 +40,8 @@ async def make_state(**updates) -> GraphState:
         update={
             "is_semantically_valid": True,
             "hidden_test_cases": [HiddenTestCase(input="1 2", output="3")],
-            "solution_codes": [SolutionCode(language="python", content="print(3)")],
-            "hint_comments": [HintComment(language="python", content="힌트")],
+            "solution_codes": [SolutionCode(language="PYTHON", content="print(3)")],
+            "hint_comments": [HintComment(language="PYTHON", content="힌트")],
             "solution_keywords": ["해시맵", "누적 카운트"],
             "algorithm_core": ALGORITHM_CORE,
             "algorithm_core_embedding": VECTOR,
