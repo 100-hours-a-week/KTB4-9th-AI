@@ -21,11 +21,11 @@ VECTOR = [0.1] * EMBEDDING_DIM
 
 async def make_state(**updates) -> GraphState:
     """정적 검증을 통과한 상태. 카테고리는 이미 정해져 있다."""
-    base = GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
+    base = GraphState(requested_difficulty="LV2", requested_category="HASH")
     state = base.model_copy(update=await fake_nodes.generate_problem(base))
     return state.model_copy(
         update={
-            "category": "HASH_TABLE",
+            "category": "HASH",
             "algorithm_core": ALGORITHM_CORE,
             **updates,
         }
@@ -161,7 +161,7 @@ async def test_comparison_is_limited_to_the_same_category(
 
     await check_duplicate(await make_state())
 
-    assert seen["category"] is Category.HASH_TABLE
+    assert seen["category"] is Category.HASH
     assert seen["limit"] == NEIGHBOR_COUNT
 
 

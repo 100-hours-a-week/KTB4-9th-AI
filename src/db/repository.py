@@ -247,16 +247,58 @@ class BattleProblemRepository:
         problem_title: str,
         problem_content: str,
         test_cases: JsonList,
+        trigger: Trigger,
     ) -> BattleProblem:
         row = BattleProblem(
             category=category,
             problem_title=problem_title,
             problem_content=problem_content,
             test_cases=test_cases,
+            trigger=trigger,
         )
         self.session.add(row)
         await self.session.flush()
         return row
+
+    async def count_pending(self) -> int:
+        """배치로 만들어 두고 아직 보내지 않은 배틀 문제 수."""
+        stmt = select(func.count()).where(
+            BattleProblem.sent_at.is_(None),
+            BattleProblem.trigger == Trigger.BATCH,
+        )
+        return await self.session.scalar(stmt)
+
+    async def list_pending(self, limit: int = 1) -> Sequence[BattleProblem]:
+        """배치로 만든 미전송 배틀 문제를 오래된 순으로.
+
+        행 잠금은 걸지 않는다. 두 곳에서 동시에 보내는 일은
+        전송 배치의 advisory lock이 막는다.
+        """
+        stmt = (
+            select(BattleProblem)
+            .where(
+                BattleProblem.sent_at.is_(None),
+                BattleProblem.trigger == Trigger.BATCH,
+            )
+            .order_by(BattleProblem.created_at, BattleProblem.id)
+            .limit(limit)
+        )
+        return (await self.session.scalars(stmt)).all()
+
+    async def mark_sent(self, problem_ids: Sequence[uuid.UUID]) -> int:
+        """전송 완료 표시. 실제로 바뀐 행 수를 돌려준다."""
+        if not problem_ids:
+            return 0
+        stmt = (
+            update(BattleProblem)
+            .where(
+                BattleProblem.id.in_(problem_ids),
+                BattleProblem.sent_at.is_(None),
+            )
+            .values(sent_at=func.now())
+        )
+        result = await self.session.execute(stmt)
+        return result.rowcount
 
 
 class BattleProblemEmbeddingRepository:

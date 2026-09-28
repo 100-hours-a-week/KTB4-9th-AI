@@ -16,6 +16,11 @@ from src.core.enums import (
 
 HIDDEN_TEST_CASE_COUNT = 7  # 문제당 보관할 비공개 테스트 케이스 수
 
+# Spring problems 테이블의 컬럼 길이. 넘으면 Spring이 저장하지 못한다.
+MAX_TITLE_LENGTH = 30
+MAX_CONTENT_LENGTH = 2048
+MAX_CATEGORY_REASON_LENGTH = 100
+
 
 class ProblemExample(BaseModel):
     """problem_examples. 문제당 최대 3개 (display_order 1~3)"""

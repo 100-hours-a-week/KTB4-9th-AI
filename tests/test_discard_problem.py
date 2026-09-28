@@ -11,7 +11,7 @@ from tests import fake_nodes
 
 async def make_state(**updates) -> GraphState:
     """정적 검증에서 폐기된 상태."""
-    base = GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
+    base = GraphState(requested_difficulty="LV2", requested_category="HASH")
     state = base.model_copy(update=await fake_nodes.generate_problem(base))
     return state.model_copy(
         update={
@@ -65,7 +65,7 @@ async def test_record_converts_the_category_to_the_enum() -> None:
     """GraphState.requested_category는 str이고 컬럼은 enum이다."""
     record = build_discard_record(await make_state())
 
-    assert record["requested_category"] is Category.HASH_TABLE
+    assert record["requested_category"] is Category.HASH
 
 
 @pytest.mark.asyncio

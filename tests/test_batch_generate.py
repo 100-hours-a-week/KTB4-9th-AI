@@ -18,6 +18,7 @@ from src.batch.generate import (
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, ProblemPurpose, Trigger
 from src.schema.batch import ProblemDemand
+from src.schema.problem import BattleProblem, HiddenTestCase
 
 DP2 = (Category.DP, Difficulty.LV2)
 ARRAY3 = (Category.ARRAY, Difficulty.LV3)
@@ -157,10 +158,15 @@ class FakeBatch:
         self.daily_error: Exception | None = None
         # 조합별로 시도 결과를 순서대로 꺼낸다. 비어 있으면 성공.
         self.outcomes: dict[tuple, list[bool]] = {}
+        self.battle_pending = 0
+        self.battle_error: Exception | None = None
+        self.battle_outcomes: list[bool] = []  # 앞에서부터 꺼낸다. 비면 성공
 
         self.demand_calls = 0
         self.daily_calls: list[Trigger] = []
+        self.battle_calls: list[Trigger] = []
         self.graph_calls: list[tuple] = []
+        self.steps: list[str] = []  # 단계가 처음 불린 순서
         self.running = 0
         self.peak = 0
 
@@ -186,13 +192,37 @@ class FakeBatch:
     async def load_pending(self, purpose):
         return self.pending[purpose]
 
+    def step(self, name: str) -> None:
+        if name not in self.steps:
+            self.steps.append(name)
+
     async def generate_daily_problems(self, trigger):
+        self.step("daily")
         self.daily_calls.append(trigger)
         if self.daily_error:
             raise self.daily_error
         return [object()] * 5
 
+    async def load_battle_pending(self):
+        if self.battle_error:
+            raise self.battle_error
+        return self.battle_pending
+
+    async def run_battle_graph(self, *, trigger):
+        self.step("battle")
+        self.battle_calls.append(trigger)
+        succeeded = self.battle_outcomes.pop(0) if self.battle_outcomes else True
+        if not succeeded:
+            return None
+        return BattleProblem(
+            category=Category.ARRAY,
+            problem_title="배열 합",
+            problem_content="합을 구하라",
+            test_cases=[HiddenTestCase(input="1", output="1")],
+        )
+
     async def run_problem_graph(self, difficulty, category, *, trigger, purpose):
+        self.step("normal")
         self.graph_calls.append((category, difficulty, trigger, purpose))
         self.running += 1
         self.peak = max(self.peak, self.running)
@@ -218,6 +248,8 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> FakeBatch:
         module, "generate_daily_problems", batch.generate_daily_problems
     )
     monkeypatch.setattr(module, "run_problem_graph", batch.run_problem_graph)
+    monkeypatch.setattr(module, "load_battle_pending", batch.load_battle_pending)
+    monkeypatch.setattr(module, "run_battle_graph", batch.run_battle_graph)
     monkeypatch.setattr(module, "DEMAND_RETRY_DELAYS_S", (0, 0))
     return batch
 
@@ -230,6 +262,7 @@ async def test_another_instance_holding_the_lock_skips_everything(fake) -> None:
     await run_generate()
 
     assert fake.daily_calls == []
+    assert fake.battle_calls == []
     assert fake.demand_calls == 0
     assert fake.graph_calls == []
 
@@ -336,6 +369,80 @@ async def test_lock_error_is_logged_not_raised(fake, caplog) -> None:
 
     assert "생성 배치를 시작하지 못함" in caplog.text
     assert fake.daily_calls == []
+
+
+@pytest.mark.asyncio
+async def test_steps_run_daily_then_battle_then_normal(fake) -> None:
+    """일반 문제는 수십 분 걸린다. 데일리·배틀이 그 뒤로 밀리면 안 된다."""
+    fake.set_spring(DP2, 2)
+
+    await run_generate()
+
+    assert fake.steps == ["daily", "battle", "normal"]
+
+
+@pytest.mark.asyncio
+async def test_only_runs_the_chosen_step(fake) -> None:
+    fake.set_spring(DP2, 0)
+
+    await run_generate(only="battle")
+
+    assert fake.steps == ["battle"]
+    assert fake.demand_calls == 0
+
+
+# ── 배틀 ───────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_battle_is_made_as_batch_when_none_is_pending(fake) -> None:
+    await run_generate()
+
+    assert fake.battle_calls == [Trigger.BATCH]
+
+
+@pytest.mark.asyncio
+async def test_battle_is_skipped_while_one_is_unsent(fake, caplog) -> None:
+    """못 보낸 문제가 다음 날 나간다. 새로 만들면 하루치가 쌓인다."""
+    fake.battle_pending = 1
+
+    with caplog.at_level(logging.INFO):
+        await run_generate()
+
+    assert fake.battle_calls == []
+    assert "미전송 배틀 1개" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_battle_stops_at_first_success(fake) -> None:
+    fake.battle_outcomes = [False, True]
+
+    await run_generate(only="battle")
+
+    assert len(fake.battle_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_battle_gives_up_after_max_attempts(fake, caplog) -> None:
+    fake.battle_outcomes = [False] * (MAX_ATTEMPTS + 1)
+
+    with caplog.at_level(logging.WARNING):
+        await run_generate(only="battle")
+
+    assert len(fake.battle_calls) == MAX_ATTEMPTS
+    assert f"배틀 문제를 {MAX_ATTEMPTS}번 시도했지만 만들지 못함" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_battle_failure_does_not_stop_normal(fake, caplog) -> None:
+    fake.battle_error = OSError("DB 연결 끊김")
+    fake.set_spring(DP2, 2)
+
+    with caplog.at_level(logging.ERROR):
+        await run_generate()
+
+    assert fake.keys_called() == [DP2]
+    assert "generate_battle" in caplog.text
 
 
 # ── 슬롯 ───────────────────────────────────────────────────────────────

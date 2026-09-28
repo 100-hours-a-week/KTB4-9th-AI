@@ -3,7 +3,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field
 
 from src.client.llm import LLMConfig
-from src.core.enums import Category, DiscardReason, Language
+from src.core.enums import Category, DiscardReason, Language, Trigger
 from src.schema.problem import ExecutionLimit
 
 # 배틀 테스트케이스 개수. 명세에 3개로 고정되어 있다.
@@ -45,6 +45,10 @@ class BattleTestCase(BaseModel):
 
 class BattleState(BaseModel):
     """배틀 문제 생성 파이프라인의 노드 간 공유 상태."""
+
+    # ---- 입력
+    # 노드는 읽지 않는다. finalize가 저장할 때 전송 대상을 가르는 데만 쓴다.
+    trigger: Trigger = Trigger.ON_DEMAND
 
     # ---- 문제
     category: Category | None = None

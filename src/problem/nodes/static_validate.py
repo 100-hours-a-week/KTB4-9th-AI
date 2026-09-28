@@ -2,7 +2,13 @@ import re
 
 from src.core.enums import ConstraintDataType, ConstraintScope, DiscardReason, Language
 from src.problem.render import format_number
-from src.problem.state import GraphState, discard
+from src.problem.state import (
+    MAX_CATEGORY_REASON_LENGTH,
+    MAX_CONTENT_LENGTH,
+    MAX_TITLE_LENGTH,
+    GraphState,
+    discard,
+)
 
 NUMERIC_TYPES = {
     ConstraintDataType.INT,
@@ -68,6 +74,22 @@ async def static_validate(state: GraphState) -> dict:
     for name, value in required.items():
         if not value:
             return discard(DiscardReason.EMPTY_FIELD, f"{name}이(가) 비었음")
+
+    # 1-1. Spring 컬럼 길이 초과. 저장이 실패하고 같은 요청의 다른 문제까지 막는다.
+    limits = {
+        "문제 제목": (state.problem_title, MAX_TITLE_LENGTH),
+        "문제 지문": (state.problem_content, MAX_CONTENT_LENGTH),
+        "카테고리 선택 이유": (
+            state.category_select_reason,
+            MAX_CATEGORY_REASON_LENGTH,
+        ),
+    }
+    for name, (value, limit) in limits.items():
+        if value and len(value) > limit:
+            return discard(
+                DiscardReason.VALIDATION_FAILED,
+                f"{name}이(가) {limit}자를 넘음: {len(value)}자",
+            )
 
     # 2. 언어별 실행 제한 누락
     given = {limit.language for limit in state.execution_limits}

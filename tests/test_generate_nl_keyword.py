@@ -17,7 +17,7 @@ from tests import fake_nodes
 
 async def make_state() -> GraphState:
     """정적 검증을 통과한 문제가 담긴 상태를 만든다."""
-    base = GraphState(requested_difficulty="LV2", requested_category="HASH_TABLE")
+    base = GraphState(requested_difficulty="LV2", requested_category="HASH")
     return base.model_copy(update=await fake_nodes.generate_problem(base))
 
 

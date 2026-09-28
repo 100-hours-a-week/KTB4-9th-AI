@@ -4,6 +4,8 @@
     uv run python -m src.batch generate  # 01:00 생성 배치
     uv run python -m src.batch send      # 03:00 전송 배치
 
+    uv run python -m src.batch generate --only battle  # 한 단계만 (daily|battle|normal)
+
 스케줄러와 같은 함수를 부르므로 advisory lock도 똑같이 잡는다.
 서버에서 같은 배치가 도는 중이면 건너뛴다.
 """
@@ -13,8 +15,10 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from src.batch.generate import (
+    GENERATE_STEPS,
     fetch_demands,
     interleave,
+    load_battle_pending,
     load_pending,
     plan_generation,
     run_generate,
@@ -30,23 +34,30 @@ async def show_plan() -> None:
     demands = await fetch_demands()
     pending = await load_pending(ProblemPurpose.NORMAL)
     daily_pending = sum((await load_pending(ProblemPurpose.DAILY)).values())
+    battle_pending = await load_battle_pending()
     plan = plan_generation(demands or [], pending)
 
     source = (
         "받지 못함 (버퍼 재고만 봄)" if demands is None else f"{len(demands)}개 항목"
     )
     print(f"Spring 재고: {source}")
-    print(f"버퍼 미전송: 일반 {sum(pending.values())}개, 데일리 {daily_pending}개")
+    print(
+        f"버퍼 미전송: 일반 {sum(pending.values())}개, "
+        f"데일리 {daily_pending}개, 배틀 {battle_pending}개"
+    )
     print(f"생성 계획: 조합 {len(plan)}개, 문제 {len(interleave(plan))}개")
     for (category, difficulty), need in plan.items():
         print(f"  {category.value}/{difficulty.value}: {need}")
 
 
-JOBS: dict[str, Callable[[], Awaitable[None]]] = {
+JOBS: dict[str, Callable[..., Awaitable[None]]] = {
     "plan": show_plan,
     "generate": run_generate,
     "send": run_send,
 }
+
+# 생성과 전송은 단계 이름이 같다(테스트가 확인한다).
+STEPS = list(GENERATE_STEPS)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -54,12 +65,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="python -m src.batch", description="새벽 배치를 한 번 실행한다"
     )
     parser.add_argument("job", choices=JOBS)
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--only", choices=STEPS, help="이 단계만 돌린다 (generate, send에서만)"
+    )
+    args = parser.parse_args(argv)
+    if args.only and args.job == "plan":
+        parser.error("--only는 generate, send에서만 쓸 수 있다")
+    return args
 
 
-async def main(job: str) -> None:
+async def main(job: str, only: str | None = None) -> None:
     try:
-        await JOBS[job]()
+        if only is None:
+            await JOBS[job]()
+        else:
+            await JOBS[job](only=only)
     finally:
         await close_engine()
 
@@ -67,4 +87,4 @@ async def main(job: str) -> None:
 if __name__ == "__main__":
     args = parse_args()
     setup_logging()
-    asyncio.run(main(args.job))
+    asyncio.run(main(args.job, args.only))

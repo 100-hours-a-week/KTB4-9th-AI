@@ -6,12 +6,56 @@ import pytest
 from src.client import backend
 from src.client.backend import (
     get_problem_demands,
+    save_battle_problem,
     save_daily_problems,
     save_problems,
 )
-from src.core.enums import Category, Difficulty
+from src.core.enums import (
+    Category,
+    ConstraintDataType,
+    ConstraintScope,
+    Difficulty,
+    Language,
+)
 from src.schema.batch import ProblemDemand
-from src.schema.problem import Problem
+from src.schema.problem import (
+    BattleProblem,
+    ExecutionLimit,
+    HiddenTestCase,
+    HintComment,
+    InputConstraint,
+    Problem,
+    ProblemExample,
+    SolutionCode,
+)
+
+# Spring enum 이름 (KTB4-9th-BE common 패키지). 계약이 바뀌면 여기부터 고친다.
+SPRING_CATEGORIES = {
+    "ARRAY", "STRING", "DP", "GRAPH", "TREE", "STACK_QUEUE", "BINARY_SEARCH",
+    "GREEDY", "BACKTRACKING", "TWO_POINTER", "HASH", "HEAP", "SORTING",
+    "IMPLEMENTATION", "BRUTE_FORCE", "MATH",
+}  # fmt: skip
+SPRING_LANGUAGES = {"PYTHON", "JAVA", "JAVASCRIPT", "CPP"}
+SPRING_SCOPES = {"INPUT", "OUTPUT"}
+SPRING_DATATYPES = {"INT", "LONG", "FLOAT", "DOUBLE", "STRING", "CHAR", "BOOLEAN"}
+
+# Spring 저장 DTO가 읽는 필드 (AiProblemsCreateRequestDto.ProblemsInfo)
+SPRING_PROBLEM_FIELDS = {
+    "problemTitle",
+    "problemDescription",
+    "inputFormat",
+    "outputFormat",
+    "difficulty",
+    "category",
+    "categorySelectReason",
+    "solutionKeywords",
+    "problemExamples",
+    "inputConstraints",
+    "executionLimits",
+    "hiddenTestCases",
+    "hintComments",
+    "hintSolutionCodes",
+}
 
 
 def fix_backend(monkeypatch: pytest.MonkeyPatch, handler) -> list[httpx.Request]:
@@ -51,12 +95,61 @@ def make_problem() -> Problem:
         output_format="쌍의 수",
         requested_difficulty=Difficulty.LV2,
         difficulty=Difficulty.LV2,
-        category=Category.HASH_TABLE,
+        category=Category.HASH,
         category_select_reason="해시맵으로 푼다",
         input_constraints=[],
         execution_limits=[],
         problem_examples=[],
     )
+
+
+def make_full_problem() -> Problem:
+    """Spring으로 가는 모든 필드가 채워진 문제."""
+    return make_problem().model_copy(
+        update={
+            "input_constraints": [
+                InputConstraint(
+                    target="S",
+                    scope=ConstraintScope.INPUT,
+                    data_type=ConstraintDataType.STRING,
+                    data_count=1,
+                ),
+                InputConstraint(
+                    target="output",
+                    scope=ConstraintScope.OUTPUT,
+                    data_type=ConstraintDataType.BOOLEAN,
+                ),
+            ],
+            "execution_limits": [
+                ExecutionLimit(
+                    language=lang, time_limit_ms=1000, memory_limit_kb=262144
+                )
+                for lang in Language
+            ],
+            "problem_examples": [ProblemExample(input="3 5", output="1")],
+            "solution_keywords": ["해시맵"],
+            "hidden_test_cases": [HiddenTestCase(input="1 2", output="0")],
+            "hint_comments": [
+                HintComment(language=lang, content="# 힌트") for lang in Language
+            ],
+            "solution_codes": [
+                SolutionCode(language=lang, content="print(1)") for lang in Language
+            ],
+        }
+    )
+
+
+def make_battle() -> BattleProblem:
+    return BattleProblem(
+        category=Category.HASH,
+        problem_title="중복 찾기",
+        problem_content="처음으로 두 번 나온 수를 출력하라",
+        test_cases=[HiddenTestCase(input=f"{n}", output=f"{n}") for n in range(3)],
+    )
+
+
+def posted_problem(requests: list[httpx.Request]) -> dict:
+    return json.loads(requests[0].content)["problems"][0]
 
 
 # ── 재고 조회 ──────────────────────────────────────────────────────────
@@ -153,6 +246,67 @@ async def test_problems_are_posted_in_camel_case(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_problem_fields_are_what_spring_reads(monkeypatch) -> None:
+    requests = fix_backend(monkeypatch, lambda request: httpx.Response(201))
+
+    await save_problems([make_full_problem()])
+
+    body = posted_problem(requests)
+    assert set(body) == SPRING_PROBLEM_FIELDS
+    assert body["problemDescription"] == "합이 M인 쌍의 수를 구하라"
+    assert [c["content"] for c in body["hintSolutionCodes"]] == ["print(1)"] * 4
+
+
+@pytest.mark.asyncio
+async def test_enums_are_sent_by_spring_name(monkeypatch) -> None:
+    """Spring은 enum 이름(대문자)만 읽는다. 값(python, str)을 보내면 500이 난다."""
+    requests = fix_backend(monkeypatch, lambda request: httpx.Response(201))
+
+    await save_problems([make_full_problem()])
+
+    body = posted_problem(requests)
+    assert body["category"] == "HASH"
+    assert body["difficulty"] == "LV2"
+    assert [c["scope"] for c in body["inputConstraints"]] == ["INPUT", "OUTPUT"]
+    assert [c["dataType"] for c in body["inputConstraints"]] == ["STRING", "BOOLEAN"]
+    for key in ("executionLimits", "hintComments", "hintSolutionCodes"):
+        assert [item["language"] for item in body[key]] == [
+            "PYTHON",
+            "JAVA",
+            "JAVASCRIPT",
+            "CPP",
+        ]
+
+
+def test_every_enum_has_a_spring_name() -> None:
+    """우리 enum에 값을 더하면 Spring에 같은 이름이 있는지 여기서 걸린다."""
+    real = [c for c in Category if c != Category.RANDOM]
+    assert {c.name for c in real} == SPRING_CATEGORIES
+    # 재고 조회 응답은 값으로 읽는다. 못 읽는 카테고리는 재고가 늘 0이라 매일 더 만든다.
+    assert {c.value for c in real} == SPRING_CATEGORIES
+    assert {lang.name for lang in Language} == SPRING_LANGUAGES
+    assert {scope.name for scope in ConstraintScope} == SPRING_SCOPES
+    assert {dtype.name for dtype in ConstraintDataType} <= SPRING_DATATYPES
+
+
+@pytest.mark.asyncio
+async def test_battle_is_posted_in_spring_form(monkeypatch) -> None:
+    requests = fix_backend(monkeypatch, lambda request: httpx.Response(201))
+
+    await save_battle_problem(make_battle())
+
+    request = requests[0]
+    body = json.loads(request.content)
+    assert request.url.path == "/daily-battles/problem"
+    assert body == {
+        "category": "HASH",
+        "problemTitle": "중복 찾기",
+        "problemDescription": "처음으로 두 번 나온 수를 출력하라",
+        "testCases": [{"input": f"{n}", "output": f"{n}"} for n in range(3)],
+    }
+
+
+@pytest.mark.asyncio
 async def test_daily_problems_carry_their_count(monkeypatch) -> None:
     requests = fix_backend(monkeypatch, lambda request: httpx.Response(201))
 
@@ -183,6 +337,8 @@ async def test_save_failure_is_raised(monkeypatch, status) -> None:
         await save_problems([make_problem()])
     with pytest.raises(httpx.HTTPStatusError):
         await save_daily_problems([make_problem()])
+    with pytest.raises(httpx.HTTPStatusError):
+        await save_battle_problem(make_battle())
 
 
 @pytest.mark.asyncio

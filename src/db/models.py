@@ -201,7 +201,10 @@ class FewshotSeed(Base):
 
 
 class BattleProblem(Base):
-    """배틀 문제. 하루 한 번 생성하며 일반 문제와 분리해 보관한다."""
+    """배틀 문제. 하루 한 번 생성하며 일반 문제와 분리해 보관한다.
+
+    새벽 전송은 trigger=BATCH이고 sent_at이 빈 행만 보낸다.
+    """
 
     __tablename__ = "battle_problems"
 
@@ -212,6 +215,12 @@ class BattleProblem(Base):
     problem_title: Mapped[str] = mapped_column(String(255))
     problem_content: Mapped[str] = mapped_column(Text)
     test_cases: Mapped[JsonList] = mapped_column(JSONB)  # list[HiddenTestCase]
+
+    # API로 만든 문제는 응답으로 이미 Spring에 나갔으므로 ON_DEMAND로 남긴다.
+    trigger: Mapped[Trigger] = mapped_column(
+        _enum_col(Trigger), server_default=Trigger.ON_DEMAND.value
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

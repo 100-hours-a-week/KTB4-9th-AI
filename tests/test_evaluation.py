@@ -18,7 +18,7 @@ def make_request(**overrides) -> EvaluationRequest:
     base = {
         "problem_title": "합이 M인 쌍의 개수",
         "problem_content": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
-        "category": "HASH_TABLE",
+        "category": "HASH",
         "category_select_reason": "M - x 존재 여부를 O(1)에 조회하는 것이 핵심",
         "solution_keywords": KEYWORDS,
         "natural_solution": (
