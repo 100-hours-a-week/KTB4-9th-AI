@@ -330,7 +330,7 @@ async def test_contradiction_check_costs_one_call_across_retries(
 
     async def fake_ref_code(state: GraphState) -> dict:
         calls["ref_code"] += 1
-        return {"reference_code": REFERENCE_CODE, "reference_language": "python"}
+        return {"reference_code": REFERENCE_CODE, "reference_language": "PYTHON"}
 
     monkeypatch.setattr(module, "call_llm_structured", fake_logic)
     fix_run(monkeypatch, succeeded("맞지 않는 출력"))
@@ -360,7 +360,7 @@ async def test_contradiction_skips_the_retry_loop_entirely(
 
     async def fake_ref_code(state: GraphState) -> dict:
         calls["ref_code"] += 1
-        return {"reference_code": REFERENCE_CODE, "reference_language": "python"}
+        return {"reference_code": REFERENCE_CODE, "reference_language": "PYTHON"}
 
     async def counting_run(code, language, stdin, limit):
         calls["run"] += 1
