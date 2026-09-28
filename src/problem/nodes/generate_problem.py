@@ -39,8 +39,11 @@ GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 - 예시의 output은 input을 실제로 풀었을 때 나오는 정확한 값이어야 한다.
 - input_constraints에는 입력 항목(scope: INPUT)과
   출력(scope: OUTPUT, target: output)을 모두 적는다.
-- data_type이 숫자형(INT, LONG, DOUBLE)일 때만 min_value, max_value를 숫자로 적는다.
-- 숫자형이 아니면(STR, CHAR, BOOL) min_value, max_value를 비워 둔다.
+- data_type이 숫자형(INT, LONG, FLOAT, DOUBLE)일 때만
+  min_value, max_value를 숫자로 적는다.
+- 정수는 INT, 범위가 크면 LONG, 실수는 DOUBLE을 쓴다.
+  FLOAT는 명시적으로 단정밀도가 필요할 때만 쓴다.
+- 숫자형이 아니면(STRING, CHAR, BOOLEAN) min_value, max_value를 비워 둔다.
 - 값들이 서로 달라야 하면 special_conditions에 "서로 다른 값"이라고 적는다.
 - execution_limits는 {languages} 네 언어를 모두 적는다.
 - category_select_reason에는 이 카테고리로 판단한 근거를

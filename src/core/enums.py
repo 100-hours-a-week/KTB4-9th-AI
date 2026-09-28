@@ -45,10 +45,11 @@ class ConstraintScope(StrEnum):
 class ConstraintDataType(StrEnum):
     INT = "INT"
     LONG = "LONG"
+    FLOAT = "FLOAT"
     DOUBLE = "DOUBLE"
-    STRING = "STR"
+    STRING = "STRING"
     CHAR = "CHAR"
-    BOOLEAN = "BOOL"
+    BOOLEAN = "BOOLEAN"
 
 
 class Category(StrEnum):

@@ -13,9 +13,12 @@ from src.problem.state import (
 NUMERIC_TYPES = {
     ConstraintDataType.INT,
     ConstraintDataType.LONG,
+    ConstraintDataType.FLOAT,
     ConstraintDataType.DOUBLE,
 }
 INTEGER_TYPES = {ConstraintDataType.INT, ConstraintDataType.LONG}
+# 정밀도만 다르고 검사 규칙은 같다
+REAL_TYPES = {ConstraintDataType.FLOAT, ConstraintDataType.DOUBLE}
 
 
 def is_number(token: str) -> bool:
@@ -40,7 +43,7 @@ def matches_type(token: str, data_type: ConstraintDataType) -> bool:
     """
     if data_type in INTEGER_TYPES:
         return re.fullmatch(r"-?\d+", token) is not None
-    if data_type == ConstraintDataType.DOUBLE:
+    if data_type in REAL_TYPES:
         return is_number(token)
     if data_type == ConstraintDataType.CHAR:
         return len(token) == 1
