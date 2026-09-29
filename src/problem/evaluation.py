@@ -1,6 +1,9 @@
+import asyncio
+
 from pydantic import BaseModel, Field
 
 from src.client.llm import LLMConfig, call_llm_structured
+from src.core.config import get_settings
 from src.schema.evaluation import EvaluationRequest, Keyword
 
 MODEL_NAME = "gemini-3.7-flash"
@@ -131,6 +134,19 @@ async def evaluate(request: EvaluationRequest) -> Evaluation:
     Raises:
         LLMOutputParseError: 응답이 형식에 맞지 않는 경우
     """
+    settings = get_settings()
+    if settings.mock_llm:
+        await asyncio.sleep(1.5)
+        keywords = [
+            KeywordVerdict(keyword=k, is_included=True)
+            for k in (request.solution_keywords or [])
+        ]
+        return Evaluation(
+            score=85,
+            feedback="[MOCK] 핵심 알고리즘 접근 방식이 올바르며 요구사항을 만족합니다.",
+            keywords=keywords,
+        )
+
     cfg = LLMConfig(
         model_name=MODEL_NAME,
         prompt_version=PROMPT_VERSION,
