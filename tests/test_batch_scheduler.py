@@ -22,10 +22,14 @@ def next_fire(job, now: datetime) -> datetime:
 @pytest.mark.parametrize(
     ("job_id", "now", "expected"),
     [
-        ("batch_generate", datetime(2026, 9, 27, 0, 30), datetime(2026, 9, 27, 1, 0)),
-        ("batch_generate", datetime(2026, 9, 27, 1, 0, 1), datetime(2026, 9, 28, 1, 0)),
-        ("batch_send", datetime(2026, 9, 27, 1, 30), datetime(2026, 9, 27, 3, 0)),
-        ("batch_send", datetime(2026, 9, 27, 4, 0), datetime(2026, 9, 28, 3, 0)),
+        ("batch_generate", datetime(2026, 9, 27, 21, 30), datetime(2026, 9, 27, 22, 0)),
+        (
+            "batch_generate",
+            datetime(2026, 9, 27, 22, 0, 1),
+            datetime(2026, 9, 28, 22, 0),
+        ),
+        ("batch_send", datetime(2026, 9, 27, 22, 30), datetime(2026, 9, 27, 23, 0)),
+        ("batch_send", datetime(2026, 9, 27, 23, 30), datetime(2026, 9, 28, 23, 0)),
     ],
 )
 def test_jobs_fire_on_the_hour_in_seoul_time(job_id, now, expected) -> None:
@@ -37,13 +41,13 @@ def test_jobs_fire_on_the_hour_in_seoul_time(job_id, now, expected) -> None:
 
 
 def test_timezone_comes_from_settings(monkeypatch) -> None:
-    """서버 시계가 UTC여도 설정한 시간대의 01:00에 돈다."""
+    """서버 시계가 UTC여도 설정한 시간대의 22:00에 돈다."""
     monkeypatch.setattr(get_settings(), "batch_timezone", "UTC")
     utc = ZoneInfo("UTC")
 
     fire = next_fire(jobs()["batch_generate"], datetime(2026, 9, 27, 0, 30, tzinfo=utc))
 
-    assert fire == datetime(2026, 9, 27, 1, 0, tzinfo=utc)
+    assert fire == datetime(2026, 9, 27, 22, 0, tzinfo=utc)
 
 
 def test_jobs_run_the_batch_entrypoints() -> None:

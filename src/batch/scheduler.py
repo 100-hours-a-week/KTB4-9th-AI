@@ -1,4 +1,4 @@
-"""새벽 배치 스케줄러.
+"""배치 스케줄러.
 
 FastAPI 프로세스 안에서 APScheduler로 돌린다. BATCH_ENABLED인 서버에서만 띄운다.
 blue/green 전환 중 두 컨테이너가 함께 떠 있어도 advisory lock이 한 곳만 실행하게 한다.
@@ -18,15 +18,15 @@ from src.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-GENERATE_HOUR = 1
-SEND_HOUR = 3
+GENERATE_HOUR = 22
+SEND_HOUR = 23
 
 # 정각에 이벤트 루프가 잠깐 바빠도 건너뛰지 않게 한다. APScheduler 기본값은 1초다.
 MISFIRE_GRACE_S = 600
 
 
 def create_scheduler() -> AsyncIOScheduler:
-    """생성(01:00)·전송(03:00) 잡을 등록한 스케줄러를 만든다. 시작은 하지 않는다."""
+    """생성(22:00)·전송(23:00) 잡을 등록한 스케줄러를 만든다. 시작은 하지 않는다."""
     timezone = get_settings().batch_timezone
     scheduler = AsyncIOScheduler(
         timezone=timezone,
