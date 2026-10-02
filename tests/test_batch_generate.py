@@ -8,6 +8,8 @@ import pytest
 from src.batch import generate as module
 from src.batch.generate import (
     ALL_KEYS,
+    AUTO_GENERATE_STEPS,
+    GENERATE_STEPS,
     MAX_ATTEMPTS,
     TARGET_STOCK,
     fill_slot,
@@ -372,13 +374,16 @@ async def test_lock_error_is_logged_not_raised(fake, caplog) -> None:
 
 
 @pytest.mark.asyncio
-async def test_steps_run_daily_then_battle_then_normal(fake) -> None:
-    """일반 문제는 수십 분 걸린다. 데일리·배틀이 그 뒤로 밀리면 안 된다."""
+async def test_steps_run_daily_then_normal(fake) -> None:
+    """일반 문제는 수십 분 걸린다. 데일리가 그 뒤로 밀리면 안 된다.
+
+    배틀은 자동 배치에서 제외돼 있어 돌지 않는다.
+    """
     fake.set_spring(DP2, 2)
 
     await run_generate()
 
-    assert fake.steps == ["daily", "battle", "normal"]
+    assert fake.steps == ["daily", "normal"]
 
 
 @pytest.mark.asyncio
@@ -396,7 +401,7 @@ async def test_only_runs_the_chosen_step(fake) -> None:
 
 @pytest.mark.asyncio
 async def test_battle_is_made_as_batch_when_none_is_pending(fake) -> None:
-    await run_generate()
+    await run_generate("battle")
 
     assert fake.battle_calls == [Trigger.BATCH]
 
@@ -407,7 +412,7 @@ async def test_battle_is_skipped_while_one_is_unsent(fake, caplog) -> None:
     fake.battle_pending = 1
 
     with caplog.at_level(logging.INFO):
-        await run_generate()
+        await run_generate("battle")
 
     assert fake.battle_calls == []
     assert "미전송 배틀 1개" in caplog.text
@@ -431,18 +436,6 @@ async def test_battle_gives_up_after_max_attempts(fake, caplog) -> None:
 
     assert len(fake.battle_calls) == MAX_ATTEMPTS
     assert f"배틀 문제를 {MAX_ATTEMPTS}번 시도했지만 만들지 못함" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_battle_failure_does_not_stop_normal(fake, caplog) -> None:
-    fake.battle_error = OSError("DB 연결 끊김")
-    fake.set_spring(DP2, 2)
-
-    with caplog.at_level(logging.ERROR):
-        await run_generate()
-
-    assert fake.keys_called() == [DP2]
-    assert "generate_battle" in caplog.text
 
 
 # ── 슬롯 ───────────────────────────────────────────────────────────────
@@ -473,3 +466,9 @@ async def test_failed_slot_retries_behind_waiting_slots(fake) -> None:
     await asyncio.gather(fill_slot(DP2, semaphore), fill_slot(ARRAY3, semaphore))
 
     assert fake.keys_called() == [DP2, ARRAY3, DP2]
+
+
+def test_battle_is_excluded_from_auto_steps() -> None:
+    """배틀은 백엔드가 받지 않아 자동 배치에서 제외돼 있다."""
+    assert "battle" not in AUTO_GENERATE_STEPS
+    assert "battle" in GENERATE_STEPS

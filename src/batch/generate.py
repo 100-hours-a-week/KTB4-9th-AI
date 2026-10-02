@@ -248,6 +248,10 @@ GENERATE_STEPS: dict[str, Step] = {
     "normal": generate_normal,
 }
 
+# 배틀은 백엔드가 아직 받지 않아(401) 자동 배치에서 제외한다.
+# 수동으로는 --only battle로 돌릴 수 있다.
+AUTO_GENERATE_STEPS = ("daily", "normal")
+
 
 async def run_generate(only: str | None = None) -> None:
     """
@@ -257,9 +261,11 @@ async def run_generate(only: str | None = None) -> None:
     한 단계가 실패해도 다음 단계는 돈다.
 
     Parameters:
-        only (str | None): 이 단계만 돌린다. 수동 실행에서 쓴다. 없으면 전부
+            only (str | None): 이 단계만 돌린다. 수동 실행에서 쓴다.
+            없으면 AUTO_GENERATE_STEPS에 있는 단계만 돈다.
     """
-    steps = [step for name, step in GENERATE_STEPS.items() if only in (None, name)]
+    names = AUTO_GENERATE_STEPS if only is None else (only,)
+    steps = [step for name, step in GENERATE_STEPS.items() if name in names]
     try:
         async with try_advisory_lock(LockKey.BATCH_GENERATE) as acquired:
             if not acquired:

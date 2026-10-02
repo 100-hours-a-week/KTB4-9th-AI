@@ -6,7 +6,14 @@ import httpx
 import pytest
 
 from src.batch import send as module
-from src.batch.send import SEND_CHUNK_SIZE, SEND_RETRY_DELAYS_S, is_rejection, run_send
+from src.batch.send import (
+    AUTO_SEND_STEPS,
+    SEND_CHUNK_SIZE,
+    SEND_RETRY_DELAYS_S,
+    SEND_STEPS,
+    is_rejection,
+    run_send,
+)
 from src.core.enums import Category, Difficulty, ProblemPurpose
 from src.problem.daily import DAILY_COUNT
 from src.schema.problem import BattleProblem, HiddenTestCase, Problem
@@ -269,38 +276,21 @@ async def test_battle_sends_the_oldest_one_alone(buffer, spring) -> None:
     """Spring은 하루 한 문제를 그날의 배틀로 쓴다. 남은 건 다음 날 나간다."""
     first, _ = buffer.add_battle(2)
 
-    await run_send()
-
+    await run_send("battle")
     assert spring.requests == [("/daily-battles/problem", [first])]
     assert buffer.sent_titles() == [first]
 
 
 @pytest.mark.asyncio
-async def test_missing_battle_is_warned_and_normal_still_goes(
-    buffer, spring, caplog
-) -> None:
-    titles = buffer.add(NORMAL, 2)
-
-    with caplog.at_level(logging.WARNING):
-        await run_send()
-
-    assert spring.requests == [("/problems", titles)]
-    assert "보낼 배틀 문제가 없음" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_rejected_battle_stays_and_normal_still_goes(
-    buffer, spring, caplog
-) -> None:
+async def test_rejected_battle_stays(buffer, spring, caplog) -> None:
     (battle,) = buffer.add_battle(1)
-    normal = buffer.add(NORMAL, 2)
     spring.reject_titles = {battle}
 
     with caplog.at_level(logging.ERROR):
-        await run_send()
+        await run_send("battle")
 
     assert spring.sizes("/daily-battles/problem") == [1]  # 거부는 다시 안 보낸다
-    assert buffer.sent_titles() == normal
+    assert buffer.sent_titles() == []
     assert "배틀 전송 실패(거부)" in caplog.text
     assert "problemContent는 비어 있을 수 없습니다" in caplog.text
     assert str(buffer.id_of(battle)) in caplog.text
@@ -313,7 +303,7 @@ async def test_battle_outage_is_retried_then_left(buffer, spring, caplog) -> Non
     spring.failures = [status_error(503)] * (1 + len(SEND_RETRY_DELAYS_S))
 
     with caplog.at_level(logging.ERROR):
-        await run_send()
+        await run_send("battle")
 
     assert spring.sizes("/daily-battles/problem") == [1] * (
         1 + len(SEND_RETRY_DELAYS_S)
@@ -328,7 +318,7 @@ async def test_battle_mark_failure_after_save_is_logged(buffer, spring, caplog) 
     buffer.mark_error = OSError("DB 연결 끊김")
 
     with caplog.at_level(logging.ERROR):
-        await run_send()
+        await run_send("battle")
 
     assert spring.sizes("/daily-battles/problem") == [1]
     assert "중복 전송될 수 있음" in caplog.text
@@ -465,15 +455,18 @@ async def test_another_instance_holding_the_lock_sends_nothing(
 
 
 @pytest.mark.asyncio
-async def test_steps_send_daily_then_battle_then_normal(buffer, spring) -> None:
-    """일반 문제는 장애 재시도로 오래 걸릴 수 있다. 데일리·배틀이 밀리면 안 된다."""
+async def test_steps_send_daily_then_normal(buffer, spring) -> None:
+    """일반 문제는 장애 재시도로 오래 걸릴 수 있다. 데일리가 밀리면 안 된다.
+
+    배틀은 자동 배치에서 제외돼 있어 버퍼에 있어도 나가지 않는다.
+    """
     buffer.add(NORMAL, 3)
     buffer.add_battle(1)
     buffer.add(DAILY, DAILY_COUNT)
 
     await run_send()
 
-    assert spring.paths() == ["/daily-problems", "/daily-battles/problem", "/problems"]
+    assert spring.paths() == ["/daily-problems", "/problems"]
 
 
 @pytest.mark.asyncio
@@ -502,3 +495,9 @@ async def test_lock_error_is_logged_not_raised(
         await run_send()
 
     assert "전송 배치를 시작하지 못함" in caplog.text
+
+
+def test_battle_is_excluded_from_auto_steps() -> None:
+    """배틀은 백엔드가 받지 않아 자동 배치에서 제외돼 있다."""
+    assert "battle" not in AUTO_SEND_STEPS
+    assert "battle" in SEND_STEPS
