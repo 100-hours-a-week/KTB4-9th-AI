@@ -196,7 +196,9 @@ async def test_생성_경로와_용도가_finalize까지_전달된다():
 
 
 @pytest.mark.asyncio
-async def test_이스케이프된_줄바꿈_예시도_의미검증을_통과한다(monkeypatch) -> None:
+async def test_이스케이프된_줄바꿈_예시도_의미검증을_통과한다(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     async def escaped_problem(state: GraphState) -> dict:
         result = await fake_nodes.generate_problem(state)
         result["problem_examples"] = [
@@ -220,5 +222,6 @@ async def test_이스케이프된_줄바꿈_예시도_의미검증을_통과한�
     )
     state = GraphState(**await graph.ainvoke(INPUT))
 
-    assert not state.is_discarded
+    assert not state.is_discarded, f"{state.discard_reason}: {state.discard_detail}"
     assert state.is_semantically_valid
+    assert state.semantic_validation_attempt == 1
