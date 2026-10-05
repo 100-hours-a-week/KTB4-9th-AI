@@ -16,6 +16,7 @@ from src.problem.state import (
     ProblemExample,
     discard,
     find_limit,
+    normalize_io_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,7 @@ def normalize_inputs(inputs: list[str], examples: list[ProblemExample]) -> list[
     seen = {example.input.strip() for example in examples}
     cleaned: list[str] = []
     for value in inputs:
-        text = value.strip()
+        text = normalize_io_text(value).strip()
         if not text or text in seen:
             continue
         seen.add(text)
