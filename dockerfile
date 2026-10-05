@@ -3,6 +3,7 @@ FROM python:3.14-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_NO_DEV=1 \
+    TZ=Asia/Seoul \
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
