@@ -10,7 +10,7 @@ from src.problem.nodes.semantic_validate import (
     normalize_output,
     semantic_validate,
 )
-from src.problem.state import GraphState, ProblemExample, find_limit
+from src.problem.state import GraphState, ProblemExample, find_limit, normalize_io_text
 from tests import fake_nodes
 from tests.fake_nodes import offline_except
 
@@ -61,6 +61,26 @@ def fix_run(monkeypatch: pytest.MonkeyPatch, result: RunResult) -> list[str]:
 
 def succeeded(stdout: str) -> RunResult:
     return RunResult(status=ExecutionStatus.SUCCEEDED, stdout=stdout)
+
+
+# ── 입출력 줄바꿈 정규화 ──────────────────────────────────────────────
+
+
+def test_escaped_newline_is_restored() -> None:
+    assert normalize_io_text("5\\n4 1 2") == "5\n4 1 2"
+
+
+def test_real_newline_is_kept() -> None:
+    assert normalize_io_text("5\n4 1 2") == "5\n4 1 2"
+
+
+def test_backslash_without_newline_escape_is_kept() -> None:
+    assert normalize_io_text("a\\b") == "a\\b"
+
+
+def test_problem_example_normalizes_on_parse() -> None:
+    example = ProblemExample(input="2\\n3 4", output="7")
+    assert example.input == "2\n3 4"
 
 
 # ── 출력 비교 ──────────────────────────────────────────────────────────
@@ -178,6 +198,20 @@ async def test_llm_failure_is_discarded_not_raised(
 
 
 # ── 실행 기반 검사 ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_escaped_newline_reaches_judge0_as_real_newline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = await make_state(
+        problem_examples=[ProblemExample(input="5 6\\n1 2 3 4 5", output="11")]
+    )
+    seen = fix_run(monkeypatch, succeeded("11"))
+
+    limit = find_limit(state.execution_limits, Language.PYTHON)
+    assert await check_examples(state, limit) is None
+    assert seen == ["5 6\n1 2 3 4 5"]
 
 
 @pytest.mark.asyncio

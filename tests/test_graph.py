@@ -1,15 +1,25 @@
 import pytest
 
-from src.core.enums import Difficulty, DiscardReason, ProblemPurpose, Trigger
+from src.client.judge0 import RunResult
+from src.core.enums import (
+    Difficulty,
+    DiscardReason,
+    ExecutionStatus,
+    ProblemPurpose,
+    Trigger,
+)
 from src.problem.graph import PARALLEL_NODES, build_graph
+from src.problem.nodes import semantic_validate as semantic_module
+from src.problem.nodes.semantic_validate import LogicVerdict
 from src.problem.state import (
     GraphState,
+    ProblemExample,
     discard,
     keep_discard_flag,
     keep_first_discard,
 )
 from tests import fake_nodes
-from tests.fake_nodes import OFFLINE_NODES
+from tests.fake_nodes import OFFLINE_NODES, offline_except
 
 INPUT = {"requested_difficulty": "LV2", "requested_category": "DP"}
 
@@ -183,3 +193,32 @@ async def test_생성_경로와_용도가_finalize까지_전달된다():
 
     assert seen[0].trigger is Trigger.BATCH
     assert seen[0].purpose is ProblemPurpose.DAILY
+
+
+@pytest.mark.asyncio
+async def test_이스케이프된_줄바꿈_예시도_의미검증을_통과한다(monkeypatch) -> None:
+    async def escaped_problem(state: GraphState) -> dict:
+        result = await fake_nodes.generate_problem(state)
+        result["problem_examples"] = [
+            ProblemExample(input="5 6\\n1 2 3 4 5", output="2")
+        ]
+        return result
+
+    async def no_contradiction(prompt, cfg, schema):
+        return LogicVerdict(contradiction="none", reason="")
+
+    async def judge0_like(code, language, stdin, limit):
+        if "\\n" in stdin:
+            return RunResult(status=ExecutionStatus.RUNTIME_ERROR, stderr="ValueError")
+        return RunResult(status=ExecutionStatus.SUCCEEDED, stdout="2")
+
+    monkeypatch.setattr(semantic_module, "call_llm_structured", no_contradiction)
+    monkeypatch.setattr(semantic_module, "run_code", judge0_like)
+
+    graph = build_graph(
+        offline_except("semantic_validate", generate_problem=escaped_problem)
+    )
+    state = GraphState(**await graph.ainvoke(INPUT))
+
+    assert not state.is_discarded
+    assert state.is_semantically_valid
