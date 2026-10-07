@@ -1,16 +1,14 @@
-import asyncio
 import logging
 
 from pydantic import BaseModel, Field
 
-from src.client.judge0 import RunResult, run_code
+from src.client.judge0 import RunResult, run_batch
 from src.client.llm import LLMConfig, call_llm_structured
 from src.core.enums import DiscardReason
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.render import render_problem
 from src.problem.state import (
     HIDDEN_TEST_CASE_COUNT,
-    ExecutionLimit,
     GraphState,
     HiddenTestCase,
     ProblemExample,
@@ -112,10 +110,8 @@ def summarize_failures(failures: list[str]) -> str:
     return f"{shown} 외 {remaining}건" if remaining > 0 else shown
 
 
-def describe_failure(index: int, result: RunResult | BaseException) -> str | None:
+def describe_failure(index: int, result: RunResult) -> str | None:
     """한 입력의 실행 결과에서 실패 사유를 뽑는다. 성공이면 None."""
-    if isinstance(result, BaseException):
-        return f"입력 {index}: 실행기 오류 {result}"
     if not result.succeeded:
         detail = result.stderr.strip().splitlines()
         tail = f" ({detail[-1][:80]})" if detail else ""
@@ -124,19 +120,6 @@ def describe_failure(index: int, result: RunResult | BaseException) -> str | Non
         # 정답 코드가 아무것도 출력하지 않으면 채점에 쓸 수 없다
         return f"입력 {index}: 출력이 비었음"
     return None
-
-
-async def run_reference(
-    state: GraphState, inputs: list[str], limit: ExecutionLimit
-) -> list[RunResult | BaseException]:
-    """레퍼런스 코드를 입력마다 돌린다. 동시 실행 수는 실행기가 묶는다."""
-    return await asyncio.gather(
-        *(
-            run_code(state.reference_code or "", REFERENCE_LANGUAGE, value, limit)
-            for value in inputs
-        ),
-        return_exceptions=True,
-    )
 
 
 async def generate_testcase(state: GraphState) -> dict:
@@ -185,7 +168,20 @@ async def generate_testcase(state: GraphState) -> dict:
             f"테스트 케이스가 {HIDDEN_TEST_CASE_COUNT}개 미만: {len(inputs)}개",
         )
 
-    results = await run_reference(state, inputs, limit)
+    try:
+        # 입력을 한 번에 제출한다. 입력마다 wait=true로 보내면 judge0 큐가 밀릴 때
+        # 연결이 묶여 ReadTimeout이 난다.
+        results = await run_batch(
+            state.reference_code, REFERENCE_LANGUAGE, inputs, limit
+        )
+    except Exception as error:
+        # run_batch는 장애를 INTERNAL_ERROR로 돌려주지만, 예상 못 한 응답 모양까지
+        # 막지는 못한다. 병렬 노드이므로 여기서도 폐기로 바꾼다.
+        logger.warning("레퍼런스 코드 실행기 오류: %s", error, exc_info=True)
+        return discard(
+            DiscardReason.REFERENCE_CODE_FAILED, f"레퍼런스 코드 실행기 오류: {error}"
+        )
+
     failures = [
         message
         for index, result in enumerate(results, start=1)
