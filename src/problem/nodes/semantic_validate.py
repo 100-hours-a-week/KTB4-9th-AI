@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from src.client.judge0 import run_code
 from src.client.llm import LLMConfig, call_llm_structured
-from src.core.enums import DiscardReason
+from src.core.enums import DiscardReason, ExecutionStatus
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.render import render_problem
 from src.problem.state import (
@@ -126,10 +126,12 @@ async def check_examples(
         if not result.succeeded:
             tail = result.stderr.strip().splitlines()
             detail = f" ({tail[-1][:80]})" if tail else ""
-            return (
-                DiscardReason.REFERENCE_CODE_FAILED,
-                f"예시 {index}: {result.status.value}{detail}",
+            reason = (
+                DiscardReason.EXECUTOR_ERROR
+                if result.status is ExecutionStatus.INTERNAL_ERROR
+                else DiscardReason.REFERENCE_CODE_FAILED
             )
+            return reason, f"예시 {index}: {result.status.value}{detail}"
 
         actual = normalize_output(result.stdout)
         expected = normalize_output(example.output)
@@ -200,6 +202,12 @@ async def semantic_validate(state: GraphState) -> dict:
         return updates | {"is_semantically_valid": True}
 
     reason, detail = failure
+    if reason is DiscardReason.EXECUTOR_ERROR:
+        # 채점 서버 장애는 레퍼런스 코드를 다시 만들어도 풀리지 않는다.
+        # 재시도하면 LLM 호출만 낭비하므로 바로 폐기한다.
+        logger.warning("의미 검증 실행기 오류로 폐기: %s", detail)
+        return updates | discard(reason, detail)
+
     if attempt < state.semantic_validation_max_attempt:
         # 레퍼런스 코드를 다시 만들어 본다
         logger.info("의미 검증 재시도 %d회: %s", attempt, detail)

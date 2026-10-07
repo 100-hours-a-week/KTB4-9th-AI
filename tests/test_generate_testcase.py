@@ -347,4 +347,56 @@ async def test_node_survives_a_runner_crash(
     result = await generate_testcase(await make_state())
 
     assert result["is_discarded"] is True
+    assert result["discard_reason"] == DiscardReason.EXECUTOR_ERROR
+
+
+def internal_error(stdin: str) -> RunResult:
+    return RunResult(
+        status=ExecutionStatus.INTERNAL_ERROR, stderr="judge0 결과 대기 시간 초과"
+    )
+
+
+@pytest.mark.asyncio
+async def test_executor_failure_is_not_blamed_on_the_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """채점 서버 장애로만 실패하면 코드 탓이 아니다. 폐기 통계에서 구분돼야 한다."""
+    fix_structured_response(monkeypatch, many_inputs())
+    inputs = many_inputs()
+    fix_run_batch(
+        monkeypatch,
+        lambda stdin: internal_error(stdin) if stdin in inputs[2:4] else succeeded("1"),
+    )
+
+    result = await generate_testcase(await make_state())
+
+    assert result["is_discarded"] is True
+    assert result["discard_reason"] == DiscardReason.EXECUTOR_ERROR
+    assert "대기 시간 초과" in result["discard_detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code_failure",
+    [RunResult(status=ExecutionStatus.TIMED_OUT), succeeded("   \n")],
+    ids=["timed_out", "empty_output"],
+)
+async def test_a_real_code_failure_outweighs_executor_failures(
+    monkeypatch: pytest.MonkeyPatch, code_failure: RunResult
+) -> None:
+    """코드가 실제로 실패한 입력이 하나라도 있으면 레퍼런스 코드 탓이다."""
+    fix_structured_response(monkeypatch, many_inputs())
+    inputs = many_inputs()
+
+    def result_for(stdin: str) -> RunResult:
+        if stdin == inputs[0]:
+            return code_failure
+        if stdin == inputs[1]:
+            return internal_error(stdin)
+        return succeeded("1")
+
+    fix_run_batch(monkeypatch, result_for)
+
+    result = await generate_testcase(await make_state())
+
     assert result["discard_reason"] == DiscardReason.REFERENCE_CODE_FAILED
