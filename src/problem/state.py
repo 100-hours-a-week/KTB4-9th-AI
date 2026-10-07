@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.client.llm import LLMConfig
 from src.core.enums import (
@@ -22,12 +22,36 @@ MAX_CONTENT_LENGTH = 2048
 MAX_CATEGORY_REASON_LENGTH = 100
 
 
+def normalize_io_text(text: str) -> str:
+    """
+    LLM이 이스케이프해 넣은 줄바꿈을 실제 줄바꿈으로 되돌린다.
+    실제 줄바꿈이 하나도 없을 때만 바꾼다.
+    입력에 백슬래시가 원래 들어가는 문자열 문제를 깨뜨리지 않기 위해서다.
+
+    Parameters:
+        text (str): 예시 입출력 또는 테스트 케이스 입력
+
+    Returns:
+        str: 줄바꿈을 되돌린 문자열
+    """
+    text = text.replace("\r\n", "\n")
+    if "\n" not in text and "\\n" in text:
+        text = text.replace("\\r\\n", "\n").replace("\\n", "\n")
+
+    return text
+
+
 class ProblemExample(BaseModel):
     """problem_examples. 문제당 최대 3개 (display_order 1~3)"""
 
     input: str
     output: str
     description: str | None = None
+
+    @field_validator("input", "output")
+    @classmethod
+    def unescape_newlines(cls, value: str) -> str:
+        return normalize_io_text(value)
 
 
 class InputConstraint(BaseModel):

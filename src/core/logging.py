@@ -39,7 +39,7 @@ def setup_logging() -> None:
             "formatters": {
                 "default": {
                     "format": "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-                    "datefmt": "%H:%M:%S",
+                    "datefmt": "%Y-%m-%d %H:%M:%S",
                 }
             },
             "filters": {"once_per_message": {"()": OncePerMessage}},
@@ -52,6 +52,7 @@ def setup_logging() -> None:
             },
             "root": {"level": level, "handlers": ["console"]},
             "loggers": {
+                "uvicorn": {"level": level, "propagate": True},
                 "uvicorn.access": {"level": level, "propagate": True},
                 "uvicorn.error": {"level": level, "propagate": True},
                 # db_echo=True일 때만 쿼리를 보여 준다
