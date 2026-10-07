@@ -153,22 +153,25 @@ async def test_non_json_response_is_internal_error(monkeypatch) -> None:
     assert result.status is ExecutionStatus.INTERNAL_ERROR
 
 
-# ── run_batch: 여러 입력을 한 번에 제출하고 결과를 폴링 ───────────────
+# ── run_batch: 입력마다 제출하고 결과를 모아 폴링 ─────────────────────
 
 
 def fix_batch(
     monkeypatch: pytest.MonkeyPatch, tokens: list[str], poll
 ) -> list[httpx.Request]:
-    """batch 제출은 tokens를 돌려주고, 조회는 poll(조회한 토큰 목록)의 결과를 돌려준다.
+    """제출은 tokens를 하나씩 차례로 돌려주고, 조회는 poll의 결과를 돌려준다.
+
+    poll은 조회한 토큰 목록을 받는다.
 
     Returns:
         list[httpx.Request]: 보낸 요청이 쌓인다
     """
     monkeypatch.setattr(judge0, "POLLING_INTERVAL_S", 0)
+    issued = iter(tokens)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
-            return httpx.Response(201, json=[{"token": token} for token in tokens])
+            return httpx.Response(201, json={"token": next(issued)})
         queried = request.url.params["tokens"].split(",")
         return httpx.Response(200, json={"submissions": poll(queried)})
 
@@ -183,6 +186,10 @@ def polls(requests: list[httpx.Request]) -> list[httpx.Request]:
     return [request for request in requests if request.method == "GET"]
 
 
+def submits(requests: list[httpx.Request]) -> list[httpx.Request]:
+    return [request for request in requests if request.method == "POST"]
+
+
 async def run_many(stdins: list[str]):
     return await run_batch("print(1)", Language.PYTHON, stdins, LIMIT)
 
@@ -195,17 +202,32 @@ async def test_batch_submits_every_input_with_the_same_code(monkeypatch) -> None
 
     await run_many(["1", "2"])
 
-    submit = requests[0]
-    assert submit.url.path == "/submissions/batch"
-    assert submit.url.params["base64_encoded"] == "false"
     payload = {
         "source_code": "print(1)",
         "language_id": LANGUAGE_TO_ID[Language.PYTHON],
         "cpu_time_limit": 1.5,
     }
-    assert json.loads(submit.content) == {
-        "submissions": [payload | {"stdin": "1"}, payload | {"stdin": "2"}]
-    }
+    sent = submits(requests)
+    assert [json.loads(request.content) for request in sent] == [
+        payload | {"stdin": "1"},
+        payload | {"stdin": "2"},
+    ]
+    for request in sent:
+        assert request.url.path == "/submissions"
+        assert request.url.params["wait"] == "false"
+        assert request.url.params["base64_encoded"] == "false"
+
+
+@pytest.mark.asyncio
+async def test_batch_does_not_use_the_batch_submit_endpoint(monkeypatch) -> None:
+    """dev 채점 서버는 같은 코드를 batch로 제출하면 stdout을 마지막 결과로 덮는다."""
+    requests = fix_batch(
+        monkeypatch, ["a", "b"], lambda queried: [finished(t) for t in queried]
+    )
+
+    await run_many(["1", "2"])
+
+    assert all(r.url.path != "/submissions/batch" for r in submits(requests))
 
 
 @pytest.mark.asyncio
@@ -293,9 +315,10 @@ async def test_batch_submit_failure_is_internal_error(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_batch_missing_token_is_internal_error(monkeypatch) -> None:
-    rejected = [{"token": "a"}, {"language_id": ["is not valid"]}]
+    # 두 번째 제출이 검증에서 거절돼 토큰 없이 돌아온다
+    replies = iter([{"token": "a"}, {"language_id": ["is not valid"]}])
     requests = fix_judge0(
-        monkeypatch, lambda request: httpx.Response(201, json=rejected)
+        monkeypatch, lambda request: httpx.Response(201, json=next(replies))
     )
 
     results = await run_many(["1", "2"])
@@ -305,12 +328,22 @@ async def test_batch_missing_token_is_internal_error(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_batch_unexpected_submit_reply_is_internal_error(monkeypatch) -> None:
+    """batch 제출 형식(목록)처럼 예상과 다른 응답이 와도 예외를 올리지 않는다."""
+    fix_judge0(monkeypatch, lambda request: httpx.Response(201, json=[{"token": "a"}]))
+
+    results = await run_many(["1"])
+
+    assert results[0].status is ExecutionStatus.INTERNAL_ERROR
+
+
+@pytest.mark.asyncio
 async def test_batch_poll_failure_is_internal_error(monkeypatch) -> None:
     monkeypatch.setattr(judge0, "POLLING_INTERVAL_S", 0)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
-            return httpx.Response(201, json=[{"token": "a"}])
+            return httpx.Response(201, json={"token": "a"})
         return httpx.Response(500)
 
     fix_judge0(monkeypatch, handler)

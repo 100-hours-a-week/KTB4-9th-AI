@@ -1,10 +1,10 @@
 """judge0 코드 실행 클라이언트.
 
 run_code는 입력 하나를 wait=true로 실행한다.
-run_batch는 같은 코드를 여러 입력으로 한 번에 제출하고 결과를 폴링한다.
+run_batch는 입력마다 결과를 기다리지 않고(wait=false) 제출한 뒤 결과를 모아 폴링한다.
 입력이 여러 개면 run_batch를 쓴다. wait=true 요청은 결과가 나올 때까지 연결을 붙잡는다.
 
-샌드박스, 컴파일, 동시 실행 관리는 채점 서버가 맡는다
+샌드박스, 컴파일, 동시 실행 관리는 채점 서버가 맡는다.
 """
 
 import asyncio
@@ -95,9 +95,36 @@ def _build_payload(
     }
 
 
+async def _submit(client: httpx.AsyncClient, payload: dict) -> str:
+    """
+    제출 하나를 결과를 기다리지 않고(wait=false) 보내고 토큰을 받는다.
+
+    POST /submissions/batch는 쓰지 않는다. dev 채점 서버에서 같은 코드를 batch로
+    제출하면 모든 제출의 stdout이 마지막 입력의 결과로 저장된다.
+
+    Parameters:
+        client (httpx.AsyncClient): judge0 클라이언트
+        payload (dict): _build_payload로 만든 제출 본문
+
+    Returns:
+        str: 제출 토큰
+    """
+    response = await client.post(
+        "/submissions",
+        params={"wait": "false", "base64_encoded": "false"},
+        json=payload,
+    )
+    response.raise_for_status()
+    body = response.json()
+    token = body.get("token") if isinstance(body, dict) else None
+    if not token:
+        raise ValueError(f"토큰을 받지 못함: {response.text[:200]}")
+    return token
+
+
 async def _poll_batch(client: httpx.AsyncClient, tokens: list[str]) -> dict[str, dict]:
     """
-    batch 제출 결과를 모두 끝나거나 대기 한도를 넘길 때까지 조회한다.
+    제출 결과를 모두 끝나거나 대기 한도를 넘길 때까지 한 번에 모아 조회한다.
 
     한도를 넘기면 그때까지 끝난 것만 돌려준다.
 
@@ -166,10 +193,11 @@ async def run_batch(
     code: str, language: Language, stdins: list[str], limit: ExecutionLimit
 ) -> list[RunResult]:
     """
-    judge0에 코드와 입력들을 한번에 모아서 요청하고 결과들을 돌려준다.
+    같은 코드를 여러 입력으로 실행하고 결과들을 돌려준다.
 
+    입력마다 결과를 기다리지 않고 제출한 뒤, 결과는 한 번에 모아 조회한다.
     예외를 올리지 않는다. 채점 서버 장애와 결과 대기 초과는 INTERNAL_ERROR로 알린다.
-    한 번에 보낼 수 있는 입력 수는 judge0 MAX_SUBMISSION_BATCH_SIZE(기본 20)까지다.
+    한 번에 조회할 수 있는 토큰 수는 judge0 MAX_SUBMISSION_BATCH_SIZE(기본 20)까지다.
 
     Parameters:
         code (str): 실행할 소스 코드
@@ -187,18 +215,9 @@ async def run_batch(
 
     try:
         async with _new_client() as client:
-            response = await client.post(
-                "/submissions/batch",
-                params={"base64_encoded": "false"},
-                json={"submissions": submissions},
-            )
-            response.raise_for_status()
-            tokens = [item.get("token") for item in response.json()]
-
-            # 코드와 언어가 같으므로 하나가 거절되면 사실상 전부 거절이다
-            if not all(tokens):
-                raise ValueError(f"토큰을 받지 못한 제출이 있음: {response.text[:200]}")
-
+            # wait=false 제출은 바로 응답하므로 차례로 보내도 금방 끝난다.
+            # 하나라도 실패하면 전부 실패로 본다. 코드와 언어가 같아 대개 같이 실패한다.
+            tokens = [await _submit(client, payload) for payload in submissions]
             finished = await _poll_batch(client, tokens)
     except (httpx.HTTPError, ValueError, KeyError) as error:
         logger.warning("judge0 batch 실행 실패: %r", error, exc_info=True)
