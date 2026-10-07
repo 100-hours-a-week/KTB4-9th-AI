@@ -41,23 +41,25 @@ def succeeded(stdout: str) -> RunResult:
     return RunResult(status=ExecutionStatus.SUCCEEDED, stdout=stdout)
 
 
-def fix_run_code(
+def fix_run_batch(
     monkeypatch: pytest.MonkeyPatch, make_result: Callable[[str], RunResult]
-) -> list[str]:
+) -> list[list[str]]:
     """
-    레퍼런스 실행을 가짜로 바꿔 끼운다.
+    레퍼런스 실행을 가짜로 바꿔 끼운다. 결과는 입력마다 make_result로 만든다.
 
     Returns:
-        list[str]: 실행에 넘어간 표준 입력이 쌓이는 목록
+        list[list[str]]: 호출마다 넘어간 표준 입력 목록이 쌓이는 목록
     """
-    seen: list[str] = []
+    calls: list[list[str]] = []
 
-    async def fake(code: str, language: Language, stdin: str, limit) -> RunResult:
-        seen.append(stdin)
-        return make_result(stdin)
+    async def fake(
+        code: str, language: Language, stdins: list[str], limit
+    ) -> list[RunResult]:
+        calls.append(stdins)
+        return [make_result(stdin) for stdin in stdins]
 
-    monkeypatch.setattr(module, "run_code", fake)
-    return seen
+    monkeypatch.setattr(module, "run_batch", fake)
+    return calls
 
 
 def fix_structured_response(
@@ -142,7 +144,9 @@ async def test_node_fills_output_from_the_reference_run(
 ) -> None:
     """기대 출력은 모델에게 묻지 않고 레퍼런스 코드를 돌려서 얻는다."""
     fix_structured_response(monkeypatch, many_inputs())
-    fix_run_code(monkeypatch, lambda stdin: succeeded(f"답: {stdin.splitlines()[0]}\n"))
+    fix_run_batch(
+        monkeypatch, lambda stdin: succeeded(f"답: {stdin.splitlines()[0]}\n")
+    )
 
     result = await generate_testcase(await make_state())
     cases = result["hidden_test_cases"]
@@ -156,15 +160,16 @@ async def test_node_fills_output_from_the_reference_run(
 
 
 @pytest.mark.asyncio
-async def test_node_runs_the_reference_once_per_input(
+async def test_node_submits_every_input_in_one_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """입력마다 따로 보내면 judge0 큐가 밀릴 때 연결이 묶인다."""
     fix_structured_response(monkeypatch, many_inputs())
-    seen = fix_run_code(monkeypatch, lambda stdin: succeeded("1"))
+    calls = fix_run_batch(monkeypatch, lambda stdin: succeeded("1"))
 
     await generate_testcase(await make_state())
 
-    assert seen == many_inputs()
+    assert calls == [many_inputs()]
 
 
 @pytest.mark.asyncio
@@ -195,7 +200,7 @@ async def test_node_discards_when_the_reference_fails(
             return RunResult(status=ExecutionStatus.TIMED_OUT)
         return succeeded("1")
 
-    fix_run_code(monkeypatch, result_for)
+    fix_run_batch(monkeypatch, result_for)
 
     result = await generate_testcase(await make_state())
 
@@ -211,7 +216,7 @@ async def test_node_discards_when_the_reference_prints_nothing(
 ) -> None:
     """출력이 없는 테스트 케이스는 채점에 쓸 수 없다."""
     fix_structured_response(monkeypatch, many_inputs())
-    fix_run_code(monkeypatch, lambda stdin: succeeded("   \n"))
+    fix_run_batch(monkeypatch, lambda stdin: succeeded("   \n"))
 
     result = await generate_testcase(await make_state())
 
@@ -226,7 +231,9 @@ async def test_node_reports_only_a_few_failures(
 ) -> None:
     """모두 실패해도 폐기 사유에 전부 적지 않는다."""
     fix_structured_response(monkeypatch, many_inputs())
-    fix_run_code(monkeypatch, lambda stdin: RunResult(status=ExecutionStatus.TIMED_OUT))
+    fix_run_batch(
+        monkeypatch, lambda stdin: RunResult(status=ExecutionStatus.TIMED_OUT)
+    )
 
     result = await generate_testcase(await make_state())
     remaining = HIDDEN_TEST_CASE_COUNT - MAX_REPORTED_FAILURES
@@ -275,7 +282,7 @@ async def test_margin_absorbs_a_collision_with_a_public_example(
     state = await make_state()
     collided = [state.problem_examples[0].input, *many_inputs(REQUESTED_COUNT - 1)]
     fix_structured_response(monkeypatch, collided)
-    fix_run_code(monkeypatch, lambda stdin: succeeded("1"))
+    fix_run_batch(monkeypatch, lambda stdin: succeeded("1"))
 
     result = await generate_testcase(state)
 
@@ -332,12 +339,64 @@ async def test_node_survives_a_runner_crash(
     """실행기가 예외를 올려도 그래프를 죽이지 않는다."""
     fix_structured_response(monkeypatch, many_inputs())
 
-    async def broken(code, language, stdin, limit):
-        raise OSError("프로세스를 띄울 수 없음")
+    async def broken(code, language, stdins, limit):
+        raise AttributeError("예상 못 한 응답 모양")
 
-    monkeypatch.setattr(module, "run_code", broken)
+    monkeypatch.setattr(module, "run_batch", broken)
 
     result = await generate_testcase(await make_state())
 
     assert result["is_discarded"] is True
+    assert result["discard_reason"] == DiscardReason.EXECUTOR_ERROR
+
+
+def internal_error(stdin: str) -> RunResult:
+    return RunResult(
+        status=ExecutionStatus.INTERNAL_ERROR, stderr="judge0 결과 대기 시간 초과"
+    )
+
+
+@pytest.mark.asyncio
+async def test_executor_failure_is_not_blamed_on_the_reference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """채점 서버 장애로만 실패하면 코드 탓이 아니다. 폐기 통계에서 구분돼야 한다."""
+    fix_structured_response(monkeypatch, many_inputs())
+    inputs = many_inputs()
+    fix_run_batch(
+        monkeypatch,
+        lambda stdin: internal_error(stdin) if stdin in inputs[2:4] else succeeded("1"),
+    )
+
+    result = await generate_testcase(await make_state())
+
+    assert result["is_discarded"] is True
+    assert result["discard_reason"] == DiscardReason.EXECUTOR_ERROR
+    assert "대기 시간 초과" in result["discard_detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code_failure",
+    [RunResult(status=ExecutionStatus.TIMED_OUT), succeeded("   \n")],
+    ids=["timed_out", "empty_output"],
+)
+async def test_a_real_code_failure_outweighs_executor_failures(
+    monkeypatch: pytest.MonkeyPatch, code_failure: RunResult
+) -> None:
+    """코드가 실제로 실패한 입력이 하나라도 있으면 레퍼런스 코드 탓이다."""
+    fix_structured_response(monkeypatch, many_inputs())
+    inputs = many_inputs()
+
+    def result_for(stdin: str) -> RunResult:
+        if stdin == inputs[0]:
+            return code_failure
+        if stdin == inputs[1]:
+            return internal_error(stdin)
+        return succeeded("1")
+
+    fix_run_batch(monkeypatch, result_for)
+
+    result = await generate_testcase(await make_state())
+
     assert result["discard_reason"] == DiscardReason.REFERENCE_CODE_FAILED

@@ -1,16 +1,14 @@
-import asyncio
 import logging
 
 from pydantic import BaseModel, Field
 
-from src.client.judge0 import RunResult, run_code
+from src.client.judge0 import RunResult, run_batch
 from src.client.llm import LLMConfig, call_llm_structured
-from src.core.enums import DiscardReason
+from src.core.enums import DiscardReason, ExecutionStatus
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.render import render_problem
 from src.problem.state import (
     HIDDEN_TEST_CASE_COUNT,
-    ExecutionLimit,
     GraphState,
     HiddenTestCase,
     ProblemExample,
@@ -112,10 +110,8 @@ def summarize_failures(failures: list[str]) -> str:
     return f"{shown} 외 {remaining}건" if remaining > 0 else shown
 
 
-def describe_failure(index: int, result: RunResult | BaseException) -> str | None:
+def describe_failure(index: int, result: RunResult) -> str | None:
     """한 입력의 실행 결과에서 실패 사유를 뽑는다. 성공이면 None."""
-    if isinstance(result, BaseException):
-        return f"입력 {index}: 실행기 오류 {result}"
     if not result.succeeded:
         detail = result.stderr.strip().splitlines()
         tail = f" ({detail[-1][:80]})" if detail else ""
@@ -126,17 +122,23 @@ def describe_failure(index: int, result: RunResult | BaseException) -> str | Non
     return None
 
 
-async def run_reference(
-    state: GraphState, inputs: list[str], limit: ExecutionLimit
-) -> list[RunResult | BaseException]:
-    """레퍼런스 코드를 입력마다 돌린다. 동시 실행 수는 실행기가 묶는다."""
-    return await asyncio.gather(
-        *(
-            run_code(state.reference_code or "", REFERENCE_LANGUAGE, value, limit)
-            for value in inputs
-        ),
-        return_exceptions=True,
+def failure_reason(results: list[RunResult]) -> DiscardReason:
+    """
+    실패가 있는 실행 결과들의 폐기 사유를 고른다.
+
+    코드가 실제로 실패한 입력(에러, 시간 초과, 빈 출력)이 하나라도 있으면
+    레퍼런스 코드 탓이다. 채점 서버 장애로만 실패했으면 코드는 판단할 수 없으므로
+    실행기 탓으로 남긴다. 둘을 섞어 기록하면 폐기 통계로 코드 품질과 인프라 문제를
+    구분할 수 없다.
+    """
+    code_failed = any(
+        result.status is not ExecutionStatus.INTERNAL_ERROR
+        and describe_failure(0, result) is not None
+        for result in results
     )
+    if code_failed:
+        return DiscardReason.REFERENCE_CODE_FAILED
+    return DiscardReason.EXECUTOR_ERROR
 
 
 async def generate_testcase(state: GraphState) -> dict:
@@ -185,20 +187,30 @@ async def generate_testcase(state: GraphState) -> dict:
             f"테스트 케이스가 {HIDDEN_TEST_CASE_COUNT}개 미만: {len(inputs)}개",
         )
 
-    results = await run_reference(state, inputs, limit)
+    try:
+        # 입력을 한 번에 제출한다. 입력마다 wait=true로 보내면 judge0 큐가 밀릴 때
+        # 연결이 묶여 ReadTimeout이 난다.
+        results = await run_batch(
+            state.reference_code, REFERENCE_LANGUAGE, inputs, limit
+        )
+    except Exception as error:
+        # run_batch는 장애를 INTERNAL_ERROR로 돌려주지만, 예상 못 한 응답 모양까지
+        # 막지는 못한다. 병렬 노드이므로 여기서도 폐기로 바꾼다.
+        logger.warning("레퍼런스 코드 실행기 오류: %s", error, exc_info=True)
+        return discard(
+            DiscardReason.EXECUTOR_ERROR, f"레퍼런스 코드 실행기 오류: {error}"
+        )
+
     failures = [
         message
         for index, result in enumerate(results, start=1)
         if (message := describe_failure(index, result)) is not None
     ]
     if failures:
-        # 한 입력이라도 실패하면 레퍼런스 코드나 제약이 잘못된 것이다.
-        # 그 상태로 만든 테스트 케이스는 채점에 쓸 수 없으므로 문제를 버린다.
+        # 한 입력이라도 실패하면 그 상태로 만든 테스트 케이스는 채점에 쓸 수 없다.
         summary = summarize_failures(failures)
         logger.warning("레퍼런스 코드 실행 실패: %s", summary)
-        return discard(
-            DiscardReason.REFERENCE_CODE_FAILED, f"레퍼런스 코드 실행 실패: {summary}"
-        )
+        return discard(failure_reason(results), f"레퍼런스 코드 실행 실패: {summary}")
 
     return {
         "hidden_test_cases": [
