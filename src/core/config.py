@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     gemini_api_key: str | None = None
 
+    # 평가용 로컬 모델 서버 (Colab vLLM + ngrok). 운영 경로에서는 쓰지 않는다
+    vllm_url: str | None = None
+    vllm_api_key: str | None = None
+
     backend_url: str = "http://localhost:8080"
 
     judge0_url: str = "http://localhost:2358"
