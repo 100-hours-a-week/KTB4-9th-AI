@@ -43,3 +43,6 @@ scripts/
 
 # ===== 모델 평가 결과 (생성 문제 전체가 담겨 크다. 요약만 공유한다) =====
 evals/results/
+# 학습 데이터 (각자 생성)
+training/data/*.json
+training/data/*.jsonl

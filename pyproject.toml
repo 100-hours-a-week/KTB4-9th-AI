@@ -23,6 +23,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "datasets>=5.0.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.8",
@@ -36,7 +37,7 @@ target-version = "py314"
 line-length = 88
 indent-width = 4
 
-extend-exclude = ["alembic/versions"]
+extend-exclude = ["alembic/versions", "training/notebooks"]
  
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
