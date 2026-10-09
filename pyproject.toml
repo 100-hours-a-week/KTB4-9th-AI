@@ -37,7 +37,7 @@ target-version = "py314"
 line-length = 88
 indent-width = 4
 
-extend-exclude = ["alembic/versions", "training/notebooks"]
+extend-exclude = ["alembic/versions", "training/notebooks", "notebooks"]
  
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
