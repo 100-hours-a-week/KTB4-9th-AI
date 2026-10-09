@@ -18,6 +18,7 @@ from evals.summarize import (
     classify,
     collect,
     count_duplicates,
+    limit_problems,
     overview_table,
     paired_table,
     render,
@@ -25,9 +26,11 @@ from evals.summarize import (
 )
 from src.core.enums import Category, Difficulty
 
+LIMITS = [{"language": "PYTHON", "time_limit_ms": 2000, "memory_limit_kb": 262144}]
 OUTPUT = {
     "problem_title": "합이 M인 쌍의 개수",
     "algorithm_core": "해시맵으로 쌍을 센다",
+    "execution_limits": LIMITS,
 }
 
 
@@ -152,6 +155,42 @@ def test_미확정_요청은_분모에서_뺀다():
 
     assert "| 3/5 |" in table
     assert "**67%**" in table
+
+
+def test_실행_제한이_비정상이면_실질_통과에서_뺀다():
+    result = label_result("a", [PASSED, PASSED])
+    tiny = OUTPUT | {
+        "execution_limits": [
+            {"language": "PYTHON", "time_limit_ms": 1000, "memory_limit_kb": 1024}
+        ]
+    }
+    result.outcomes[1].generation = generation(request(2), output=tiny)
+
+    table = overview_table([result])
+
+    assert result.outcomes[1].limit_problems == ["PYTHON 메모리 1024KB"]
+    assert not result.outcomes[1].usable
+    assert "| 100% | 1 (50%) | **50%**" in table
+
+
+@pytest.mark.parametrize(
+    ("memory", "time_ms", "expected"),
+    [
+        (262144, 2000, []),
+        (32768, 100, []),
+        (1024, 2000, ["PYTHON 메모리 1024KB"]),
+        (4_194_304, 2000, ["PYTHON 메모리 4194304KB"]),
+        (262144, 10, ["PYTHON 시간 10ms"]),
+    ],
+)
+def test_실행_제한_범위를_검사한다(memory, time_ms, expected):
+    output = {
+        "execution_limits": [
+            {"language": "PYTHON", "time_limit_ms": time_ms, "memory_limit_kb": memory}
+        ]
+    }
+
+    assert limit_problems(output) == expected
 
 
 def test_같은_요청끼리_비교한다():

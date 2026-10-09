@@ -11,6 +11,10 @@
 - 통과: 의미 검증까지 통과
 - 폐기: 생성 형식 실패, 정적 검증 폐기, 의미 검증 폐기 (모델 탓)
 - 미확정: 아직 생성·채점 안 함, 또는 인프라 장애로 끝남 → 비율 계산에서 뺀다
+
+운영 검증은 실행 제한 값이 말이 되는지 보지 않는다 (judge0에 메모리 제한을 보내지
+않고, static_validate는 값이 있는지만 본다). 그래서 메모리 1MB 같은 문제도 통과한다.
+요약에서는 실행 제한이 정상 범위인지 따로 보고, 정상인 통과만 실질 통과로 센다.
 """
 
 import argparse
@@ -40,6 +44,10 @@ INFRA = "INFRA"
 UNDETERMINED = {NOT_GENERATED, NOT_SCORED, INFRA}
 
 DUPLICATE_SIMILARITY = 0.87  # check_duplicate와 같은 기준
+
+# 실행 제한 정상 범위. 운영 Gemini 문제는 메모리 128~512MB, 시간 수백 ms~수 초다
+MEMORY_LIMIT_KB_RANGE = (32 * 1024, 2 * 1024 * 1024)  # 32MB ~ 2GB
+TIME_LIMIT_MS_RANGE = (100, 20_000)  # 0.1초 ~ 20초
 EMBEDDINGS_FILE = "embeddings.json"
 
 
@@ -58,6 +66,17 @@ class Outcome:
     def passed(self) -> bool:
         return self.result == PASSED
 
+    @property
+    def limit_problems(self) -> list[str]:
+        if self.generation is None or self.generation.output is None:
+            return []
+        return limit_problems(self.generation.output)
+
+    @property
+    def usable(self) -> bool:
+        """검증을 통과했고 실행 제한도 정상이라 실제로 쓸 수 있는 문제."""
+        return self.passed and not self.limit_problems
+
 
 @dataclass
 class LabelResult:
@@ -71,6 +90,28 @@ class LabelResult:
     @property
     def determined(self) -> list[Outcome]:
         return [o for o in self.outcomes if o.determined]
+
+
+def limit_problems(output: dict) -> list[str]:
+    """
+    생성된 문제의 실행 제한 중 정상 범위를 벗어난 것을 찾는다.
+
+    Parameters:
+        output (dict): generate_problem 출력
+
+    Returns:
+        list[str]: 예: ["PYTHON 메모리 1024KB"]. 정상이면 빈 리스트
+    """
+    problems = []
+    low_mem, high_mem = MEMORY_LIMIT_KB_RANGE
+    low_time, high_time = TIME_LIMIT_MS_RANGE
+    for limit in output.get("execution_limits") or []:
+        memory, time_ms = limit.get("memory_limit_kb"), limit.get("time_limit_ms")
+        if memory is not None and not low_mem <= memory <= high_mem:
+            problems.append(f"{limit.get('language')} 메모리 {memory}KB")
+        if time_ms is not None and not low_time <= time_ms <= high_time:
+            problems.append(f"{limit.get('language')} 시간 {time_ms}ms")
+    return problems
 
 
 def classify(
@@ -167,7 +208,9 @@ def overview_table(results: list[LabelResult]) -> str:
         "label",
         "모델",
         "확정/전체",
-        "**통과율** (95% 구간)",
+        "검증 통과율",
+        "통과 중 실행 제한 비정상",
+        "**실질 통과율** (95% 구간)",
         "생성 형식 실패",
         "정적 검증 폐기",
         "의미 검증 폐기",
@@ -179,7 +222,9 @@ def overview_table(results: list[LabelResult]) -> str:
         determined = r.determined
         total = len(determined)
         passed = sum(o.passed for o in determined)
-        low, high = wilson_interval(passed, total)
+        usable = sum(o.usable for o in determined)
+        bad_limits = passed - usable
+        low, high = wilson_interval(usable, total)
         by_stage = Counter(o.result.split(":")[0] for o in determined)
         gen_seconds = [
             o.generation.seconds
@@ -196,7 +241,9 @@ def overview_table(results: list[LabelResult]) -> str:
                 r.label,
                 r.model,
                 f"{total}/{len(r.outcomes)}",
-                f"**{pct(passed, total)}** ({low:.0%}~{high:.0%})" if total else "-",
+                pct(passed, total),
+                f"{bad_limits} ({pct(bad_limits, passed)})" if bad_limits else "-",
+                f"**{pct(usable, total)}** ({low:.0%}~{high:.0%})" if total else "-",
                 pct(by_stage["generate_problem"], total),
                 pct(by_stage["static_validate"], total),
                 pct(by_stage["semantic_validate"], total),
@@ -224,7 +271,7 @@ def reason_table(results: list[LabelResult]) -> str:
 
 
 def breakdown_table(results: list[LabelResult], key: str) -> str:
-    """난이도별 또는 카테고리별 통과율 (통과/확정)."""
+    """난이도별 또는 카테고리별 실질 통과율 (실질 통과/확정)."""
     values = sorted(
         {getattr(o.request, key) for r in results for o in r.outcomes},
         key=lambda v: list(Difficulty if key == "difficulty" else Category).index(v),
@@ -234,15 +281,15 @@ def breakdown_table(results: list[LabelResult], key: str) -> str:
         row = [value.value]
         for r in results:
             group = [o for o in r.determined if getattr(o.request, key) == value]
-            passed = sum(o.passed for o in group)
-            row.append(f"{pct(passed, len(group))} ({passed}/{len(group)})")
+            usable = sum(o.usable for o in group)
+            row.append(f"{pct(usable, len(group))} ({usable}/{len(group)})")
         rows.append(row)
     title = "난이도" if key == "difficulty" else "카테고리"
     return markdown_table([title, *(r.label for r in results)], rows)
 
 
 def paired_table(results: list[LabelResult]) -> str:
-    """첫 label과 같은 요청끼리 비교한다. 둘 다 확정된 요청만 센다."""
+    """첫 label과 같은 요청끼리 실질 통과를 비교한다. 둘 다 확정된 요청만 센다."""
     base = results[0]
     base_by_id = {o.request.id: o for o in base.determined}
     rows = []
@@ -252,9 +299,9 @@ def paired_table(results: list[LabelResult]) -> str:
             for o in r.determined
             if o.request.id in base_by_id
         ]
-        both = sum(b.passed and o.passed for b, o in pairs)
-        only_base = sum(b.passed and not o.passed for b, o in pairs)
-        only_this = sum(o.passed and not b.passed for b, o in pairs)
+        both = sum(b.usable and o.usable for b, o in pairs)
+        only_base = sum(b.usable and not o.usable for b, o in pairs)
+        only_this = sum(o.usable and not b.usable for b, o in pairs)
         neither = len(pairs) - both - only_base - only_this
         rows.append(
             [
@@ -350,16 +397,20 @@ def render(results: list[LabelResult]) -> str:
         "## 요약",
         overview_table(results),
         "- 비율의 분모는 확정된 요청이다. 미생성·미채점·인프라 장애는 뺀다.\n"
+        "- 실질 통과 = 검증 통과 + 실행 제한 정상 "
+        f"(메모리 {MEMORY_LIMIT_KB_RANGE[0] // 1024}MB~"
+        f"{MEMORY_LIMIT_KB_RANGE[1] // 1024 // 1024}GB, "
+        f"시간 {TIME_LIMIT_MS_RANGE[0]}ms~{TIME_LIMIT_MS_RANGE[1] // 1000}초).\n"
         "- 의미 검증 시도 = 레퍼런스 코드를 만든 횟수 (1이면 한 번에 판정).",
         "## 폐기 사유",
         reason_table(results),
-        "## 난이도별 통과율",
+        "## 난이도별 실질 통과율",
         breakdown_table(results, "difficulty"),
-        "## 카테고리별 통과율",
+        "## 카테고리별 실질 통과율",
         breakdown_table(results, "category"),
     ]
     if len(results) > 1:
-        sections += ["## 같은 요청끼리 비교", paired_table(results)]
+        sections += ["## 같은 요청끼리 비교 (실질 통과)", paired_table(results)]
     if any(r.duplicates is not None for r in results):
         sections += ["## 다양성", diversity_table(results)]
     return "\n\n".join(sections) + "\n"
