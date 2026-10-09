@@ -112,8 +112,11 @@ def test_identity가_다르면_같은_label로_이어_돌리지_않는다(tmp_pa
 
 def test_트레이스를_평가_프로젝트로_보낸다(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("LANGSMITH_PROJECT", "cosmos")
+    # 앞선 테스트가 남긴 캐시를 비우고, "cosmos"가 캐시에 들어간 상태에서 시작한다.
+    # get_env_var도 캐시라 둘 다 비워야 한다 (.env가 없는 CI에는 'default'가 남는다)
+    langsmith.utils.get_env_var.cache_clear()
     langsmith.utils.get_tracer_project.cache_clear()
-    assert langsmith.utils.get_tracer_project() == "cosmos"  # 캐시에 들어간 상태
+    assert langsmith.utils.get_tracer_project() == "cosmos"
 
     try:
         configure_langsmith("cosmos-model-eval")
