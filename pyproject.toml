@@ -12,6 +12,7 @@ dependencies = [
     "langchain-core>=1.6.3",
     "langchain-google-genai>=4.4.0",
     "langgraph>=1.2.11",
+    "openai>=3.26.0",
     "pgvector>=0.5.0",
     "psycopg[binary]>=3.3.5",
     "pydantic>=2.13.5",
@@ -36,7 +37,7 @@ target-version = "py314"
 line-length = 88
 indent-width = 4
 
-extend-exclude = ["alembic/versions", "training/notebooks"]
+extend-exclude = ["alembic/versions", "training/notebooks", "notebooks"]
  
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
