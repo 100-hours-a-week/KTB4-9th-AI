@@ -20,7 +20,7 @@ from src.problem.state import (
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "gemini-3.8-flash"
-PROMPT_VERSION = "generate_problem/v8"
+PROMPT_VERSION = "generate_problem/v9"
 
 GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 
@@ -34,6 +34,8 @@ GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 [규칙]
 - 요청 난이도와 카테고리에 맞는 새로운 문제를 한국어로 만든다.
 - problem_title은 {max_title}자 이하, problem_content는 {max_content}자 이하로 쓴다.
+- problem_content는 상황 설명, 요구할 것, 추가 조건을 각각 빈 줄로 나눠 쓴다.
+  한 덩어리로 이어 쓰지 않는다. 사용자가 모바일 화면에서 읽는다.
 - difficulty에는 요청 난이도 {difficulty}를 그대로 적는다.
 - 공개 예시는 1~3개이며, 모든 예시는 제약 조건을 만족해야 한다.
 - 예시의 output은 input을 실제로 풀었을 때 나오는 정확한 값이어야 한다.
