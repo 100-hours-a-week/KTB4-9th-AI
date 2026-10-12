@@ -17,7 +17,8 @@ from pydantic import BaseModel, Field
 
 from src.client.judge0 import run_code
 from src.client.llm import LLMConfig, call_llm_structured
-from src.core.enums import DiscardReason
+from src.core.config import get_settings
+from src.core.enums import DiscardReason, ExecutionStatus
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.render import render_problem
 from src.problem.state import (
@@ -29,7 +30,6 @@ from src.problem.state import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.7-flash"
 PROMPT_VERSION = "semantic_validate/v1"
 
 LOGIC_PROMPT = """당신은 코딩 테스트 문제의 검수자다.
@@ -126,10 +126,12 @@ async def check_examples(
         if not result.succeeded:
             tail = result.stderr.strip().splitlines()
             detail = f" ({tail[-1][:80]})" if tail else ""
-            return (
-                DiscardReason.REFERENCE_CODE_FAILED,
-                f"예시 {index}: {result.status.value}{detail}",
+            reason = (
+                DiscardReason.EXECUTOR_ERROR
+                if result.status is ExecutionStatus.INTERNAL_ERROR
+                else DiscardReason.REFERENCE_CODE_FAILED
             )
+            return reason, f"예시 {index}: {result.status.value}{detail}"
 
         actual = normalize_output(result.stdout)
         expected = normalize_output(example.output)
@@ -172,7 +174,7 @@ async def semantic_validate(state: GraphState) -> dict:
     # ---- 1. 모순 검사. 지문은 재시도해도 그대로이므로 첫 시도에만 부른다.
     if state.semantic_validation_attempt == 0:
         cfg = LLMConfig(
-            model_name=MODEL_NAME,
+            model_name=get_settings().llm_models.semantic_validate,
             prompt_version=PROMPT_VERSION,
             temperature=0.2,
         )
@@ -200,6 +202,12 @@ async def semantic_validate(state: GraphState) -> dict:
         return updates | {"is_semantically_valid": True}
 
     reason, detail = failure
+    if reason is DiscardReason.EXECUTOR_ERROR:
+        # 채점 서버 장애는 레퍼런스 코드를 다시 만들어도 풀리지 않는다.
+        # 재시도하면 LLM 호출만 낭비하므로 바로 폐기한다.
+        logger.warning("의미 검증 실행기 오류로 폐기: %s", detail)
+        return updates | discard(reason, detail)
+
     if attempt < state.semantic_validation_max_attempt:
         # 레퍼런스 코드를 다시 만들어 본다
         logger.info("의미 검증 재시도 %d회: %s", attempt, detail)

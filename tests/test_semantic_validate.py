@@ -299,6 +299,39 @@ async def test_execution_failure_reports_reference_code_failed(
 
 
 @pytest.mark.asyncio
+async def test_executor_failure_is_discarded_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """채점 서버 장애는 코드를 다시 만들어도 풀리지 않으니 첫 시도에서 바로 폐기한다."""
+    fix_verdict(monkeypatch, "none")
+    fix_run(
+        monkeypatch,
+        RunResult(status=ExecutionStatus.INTERNAL_ERROR, stderr="ReadTimeout('')"),
+    )
+
+    result = await semantic_validate(await make_state())
+
+    assert result["is_discarded"] is True
+    assert result["discard_reason"] == DiscardReason.EXECUTOR_ERROR
+    assert "ReadTimeout" in result["discard_detail"]
+    assert result["semantic_validation_attempt"] == 1
+
+
+@pytest.mark.asyncio
+async def test_execution_failure_still_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """코드가 실제로 실패한 경우는 지금처럼 다시 만들어 본다."""
+    fix_verdict(monkeypatch, "none")
+    fix_run(monkeypatch, RunResult(status=ExecutionStatus.TIMED_OUT))
+
+    result = await semantic_validate(await make_state())
+
+    assert result["is_semantically_valid"] is False
+    assert "is_discarded" not in result
+
+
+@pytest.mark.asyncio
 async def test_check_examples_returns_none_when_all_match(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

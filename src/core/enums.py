@@ -113,6 +113,7 @@ class DiscardReason(StrEnum):
 
     # 공통
     LLM_ERROR = "LLM_ERROR"  # LLM 호출 또는 구조화 응답 해석 실패
+    EXECUTOR_ERROR = "EXECUTOR_ERROR"  # 채점 서버 장애 또는 결과 대기 초과
     VALIDATION_FAILED = "VALIDATION_FAILED"  # 길이·개수 등 명세 제약 위반
 
 
