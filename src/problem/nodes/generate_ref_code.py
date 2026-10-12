@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field
 
 from src.client.llm import LLMConfig, call_llm_structured, strip_code_fence
+from src.core.config import get_settings
 from src.core.enums import Language
 from src.core.exception import LLMOutputParseError
 from src.problem.render import render_problem
 from src.problem.state import GraphState
 
-MODEL_NAME = "gemini-3.8-flash"
 PROMPT_VERSION = "generate_ref_code/v4"
 REFERENCE_LANGUAGE = Language.PYTHON
 # 채점 서버(judge0 language_id 71)의 파이썬 버전. 서버를 올리면 같이 바꾼다.
@@ -74,7 +74,7 @@ async def generate_ref_code(state: GraphState) -> dict:
         LLMOutputParseError: 응답이 형식에 맞지 않거나 코드가 비어 있는 경우
     """
     cfg = LLMConfig(
-        model_name=MODEL_NAME,
+        model_name=get_settings().llm_models.generate_ref_code,
         prompt_version=PROMPT_VERSION,
         temperature=0.2,
     )

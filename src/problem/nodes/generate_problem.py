@@ -4,6 +4,7 @@ import random
 from pydantic import BaseModel, Field
 
 from src.client.llm import LLMConfig, call_llm_structured
+from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, Language
 from src.db.repository import FewshotSeedRepository
 from src.db.session import session_scope
@@ -19,7 +20,6 @@ from src.problem.state import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.8-flash"
 PROMPT_VERSION = "generate_problem/v9"
 
 GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
@@ -194,9 +194,9 @@ async def generate_problem(state: GraphState) -> dict:
     """
     # temperature는 넘기지 않는다. 이 모델은 고정 샘플링이라 값을 무시한다.
     cfg = LLMConfig(
-        model_name=MODEL_NAME,
+        model_name=get_settings().llm_models.generate_problem,
         prompt_version=PROMPT_VERSION,
-        top_k=3,
+        top_k=1,
     )
 
     category = resolve_category(state.requested_category)

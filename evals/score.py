@@ -306,9 +306,9 @@ def build_meta(args: argparse.Namespace, model: str) -> dict:
     return {
         "label": args.label,
         "model": model,
-        "ref_code_model": generate_ref_code.MODEL_NAME,
+        "ref_code_model": get_settings().llm_models.generate_ref_code,
         "ref_code_prompt": generate_ref_code.PROMPT_VERSION,
-        "semantic_model": semantic_validate.MODEL_NAME,
+        "semantic_model": get_settings().llm_models.semantic_validate,
         "semantic_prompt": semantic_validate.PROMPT_VERSION,
         "langsmith_project": args.project,
         "created_at": datetime.now(UTC).isoformat(),

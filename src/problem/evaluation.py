@@ -6,7 +6,6 @@ from src.client.llm import LLMConfig, call_llm_structured
 from src.core.config import get_settings
 from src.schema.evaluation import EvaluationRequest, Keyword
 
-MODEL_NAME = "gemini-3.7-flash"
 PROMPT_VERSION = "evaluate_nl_solution/v1"
 
 MIN_SCORE = 0
@@ -148,7 +147,7 @@ async def evaluate(request: EvaluationRequest) -> Evaluation:
         )
 
     cfg = LLMConfig(
-        model_name=MODEL_NAME,
+        model_name=get_settings().llm_models.evaluation_nl_solution,
         prompt_version=PROMPT_VERSION,
         temperature=0.0,
     )

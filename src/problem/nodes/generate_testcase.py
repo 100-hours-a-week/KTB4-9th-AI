@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from src.client.judge0 import RunResult, run_batch
 from src.client.llm import LLMConfig, call_llm_structured
+from src.core.config import get_settings
 from src.core.enums import DiscardReason, ExecutionStatus
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.render import render_problem
@@ -19,7 +20,6 @@ from src.problem.state import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.7-flash"
 PROMPT_VERSION = "generate_testcase/v2"
 
 # 중복과 공개 예시 겹침으로 줄어드는 몫을 감안해 넉넉히 요청한다.
@@ -156,7 +156,7 @@ async def generate_testcase(state: GraphState) -> dict:
         dict: 비공개 테스트 케이스와 호출 설정. 실패 시 폐기 정보
     """
     cfg = LLMConfig(
-        model_name=MODEL_NAME,
+        model_name=get_settings().llm_models.generate_testcase,
         prompt_version=PROMPT_VERSION,
         temperature=0.7,  # 입력이 서로 다양해야 한다
     )

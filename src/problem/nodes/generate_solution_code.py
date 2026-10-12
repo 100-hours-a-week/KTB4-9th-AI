@@ -4,6 +4,7 @@ import logging
 from pydantic import BaseModel, Field
 
 from src.client.llm import LLMConfig, call_llm_structured, strip_code_fence
+from src.core.config import get_settings
 from src.core.enums import DiscardReason, Language
 from src.core.exception import LLMOutputParseError
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
@@ -18,7 +19,6 @@ from src.problem.state import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.7-flash"
 PROMPT_VERSION = "generate_solution_code/v1"
 
 HINT_RULE = """- hint에는 이 언어로 풀 때 막히기 쉬운 지점을 한두 문장으로 적는다.
@@ -155,7 +155,7 @@ async def generate_solution_code(state: GraphState) -> dict:
         dict: 언어별 정답 코드, 힌트, 호출 설정. 실패 시 폐기 정보
     """
     cfg = LLMConfig(
-        model_name=MODEL_NAME,
+        model_name=get_settings().llm_models.generate_solution_code,
         prompt_version=PROMPT_VERSION,
         temperature=0.2,
     )
