@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from src.client.embedding import EMBEDDING_MODEL, embed_text
 from src.client.judge0 import run_code
 from src.client.llm import LLMConfig, call_llm_structured
+from src.core.config import get_settings
 from src.core.enums import Category, DiscardReason
 from src.core.exception import LLMOutputParseError, ProblemSaveError
 from src.db.repository import (
@@ -27,7 +28,6 @@ from src.problem.battle.state import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.7-flash"
 PROMPT_VERSION = "generate_battle_problem/v1"
 
 # 채점 서버(judge0 language_id 71)의 파이썬 버전.
@@ -95,7 +95,9 @@ async def generate_battle_problem(state: BattleState) -> dict:
         dict: 생성한 문제 필드와 호출 설정. 실패하면 폐기 정보
     """
     cfg = LLMConfig(
-        model_name=MODEL_NAME, prompt_version=PROMPT_VERSION, temperature=0.9
+        model_name=get_settings().llm_models.generate_battle_problem,
+        prompt_version=PROMPT_VERSION,
+        temperature=0.9,
     )
     category = state.category or random.choice(RESPONSE_CATEGORIES)
 
