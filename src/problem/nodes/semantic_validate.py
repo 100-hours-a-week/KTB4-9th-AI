@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from src.client.judge0 import run_code
 from src.client.llm import LLMConfig, call_llm_structured
+from src.core.config import get_settings
 from src.core.enums import DiscardReason, ExecutionStatus
 from src.problem.nodes.generate_ref_code import REFERENCE_LANGUAGE
 from src.problem.render import render_problem
@@ -29,7 +30,6 @@ from src.problem.state import (
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.7-flash"
 PROMPT_VERSION = "semantic_validate/v1"
 
 LOGIC_PROMPT = """당신은 코딩 테스트 문제의 검수자다.
@@ -174,7 +174,7 @@ async def semantic_validate(state: GraphState) -> dict:
     # ---- 1. 모순 검사. 지문은 재시도해도 그대로이므로 첫 시도에만 부른다.
     if state.semantic_validation_attempt == 0:
         cfg = LLMConfig(
-            model_name=MODEL_NAME,
+            model_name=get_settings().llm_models.semantic_validate,
             prompt_version=PROMPT_VERSION,
             temperature=0.2,
         )

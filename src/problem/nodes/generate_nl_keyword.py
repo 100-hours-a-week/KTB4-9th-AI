@@ -3,13 +3,13 @@ import logging
 from pydantic import BaseModel, Field
 
 from src.client.llm import LLMConfig, call_llm_structured
+from src.core.config import get_settings
 from src.core.enums import DiscardReason
 from src.problem.render import render_problem
 from src.problem.state import GraphState, discard
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.5-flash-lite"
 PROMPT_VERSION = "generate_nl_keyword/v1"
 
 KEYWORD_MIN = 3
@@ -99,7 +99,7 @@ async def generate_nl_keyword(state: GraphState) -> dict:
         dict: 채점 키워드와 호출 설정. 실패 시 폐기 정보
     """
     cfg = LLMConfig(
-        model_name=MODEL_NAME,
+        model_name=get_settings().llm_models.generate_nl_keyword,
         prompt_version=PROMPT_VERSION,
         temperature=0.2,
     )
