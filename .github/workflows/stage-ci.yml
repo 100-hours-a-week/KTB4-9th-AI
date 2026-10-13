@@ -1,0 +1,83 @@
+name: Stage AI CI
+
+on:
+  push:
+    branches: [stage]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-stage-ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Build and publish immutable ECR image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/stage'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify publish configuration
+        env:
+          AWS_STAGE_CI_ROLE_ARN: ${{ vars.AWS_STAGE_CI_ROLE_ARN }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          for name in AWS_REGION ECR_REPOSITORY AWS_STAGE_CI_ROLE_ARN AWS_ACCOUNT_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required GitHub Actions variable: ${name}"
+              exit 1
+            fi
+          done
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_STAGE_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+
+      - name: Check whether the immutable image already exists
+        id: image
+        run: |
+          set -euo pipefail
+          error_file="${RUNNER_TEMP}/ecr-describe-error"
+
+          if aws ecr describe-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids imageTag="${IMAGE_TAG}" \
+            --region "${AWS_REGION}" >/dev/null 2>"${error_file}"; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+          elif grep -q 'ImageNotFoundException' "${error_file}"; then
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+          else
+            cat "${error_file}" >&2
+            exit 1
+          fi
+
+      - name: Log in to Amazon ECR
+        if: steps.image.outputs.exists == 'false'
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push SHA image
+        if: steps.image.outputs.exists == 'false'
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          docker build --pull -f dockerfile -t "${image}" .
+          docker push "${image}"
