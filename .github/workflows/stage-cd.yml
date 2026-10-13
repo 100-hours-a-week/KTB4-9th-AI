@@ -1,0 +1,76 @@
+name: Stage AI CD
+
+on:
+  pull_request:
+    branches: [stage]
+    types: [closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage-ai-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy merged PR image to staging ECS
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      IMAGE_TAG: ${{ github.event.pull_request.head.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify deployment configuration
+        env:
+          AWS_STAGE_CD_ROLE_ARN: ${{ vars.AWS_STAGE_CD_ROLE_ARN }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          for name in AWS_REGION ECR_REPOSITORY AWS_STAGE_CD_ROLE_ARN AWS_ACCOUNT_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required staging Environment variable: ${name}"
+              exit 1
+            fi
+          done
+          if [[ ! "${IMAGE_TAG}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid PR head SHA: ${IMAGE_TAG}"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_STAGE_CD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+
+      - name: Deploy immutable image to ECS
+        run: |
+          bash .github/scripts/deploy-ecs-image.sh \
+            cosmos-v2-stage-cluster \
+            cosmos-v2-stage-fastapi \
+            cosmos-v2-stage-fastapi \
+            fastapi \
+            "${ECR_REPOSITORY}" \
+            "${IMAGE_TAG}" \
+            "${AWS_REGION}"
+
+      - name: Smoke check staging API
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent \
+            --retry 10 --retry-all-errors --retry-delay 10 \
+            --max-time 15 \
+            https://stage-ai.cosmoscode.site/health
