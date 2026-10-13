@@ -1,33 +1,36 @@
 name: Stage AI CI
 
 on:
-  push:
+  pull_request:
     branches: [stage]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ai-stage-ci-${{ github.head_ref || github.ref }}
+  group: ai-stage-ci-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   publish:
     name: Build and publish immutable ECR image
-    if: github.event_name == 'push' && github.ref == 'refs/heads/stage'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: staging
+    environment: staging-ci
     permissions:
       contents: read
       id-token: write
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-      IMAGE_TAG: ${{ github.sha }}
+      IMAGE_TAG: ${{ github.event.pull_request.head.sha }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: Verify publish configuration
         env:
