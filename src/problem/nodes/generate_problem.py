@@ -220,8 +220,8 @@ async def generate_problem(state: GraphState) -> dict:
         "problem_content": problem.problem_content,
         "input_format": problem.input_format,
         "output_format": problem.output_format,
-        "problem_examples": problem.problem_examples,
         "input_constraints": problem.input_constraints,
         "execution_limits": problem.execution_limits,
+        "problem_examples": problem.problem_examples,
         "node_models": {"generate_problem": cfg},
     }
