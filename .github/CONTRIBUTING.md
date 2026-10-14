@@ -13,8 +13,7 @@
 
 ```python
 some_function_with_a_long_name(
-    argument_1, argument_2, argument_3,
-    argument_4, argument_5
+    argument_1, argument_2, argument_3, argument_4, argument_5
 )
 ```
 
@@ -29,6 +28,7 @@ some_function_with_a_long_name(
 ```python
 class MyClass:
     pass
+
 
 def my_function():
     pass
@@ -107,7 +107,7 @@ def add(a: int, b: int) -> int:
 - 간단한 리스트 생성은 리스트 컴프리헨션(list comprehension)을 활용한다.
     
     ```python
-    squares = [n ** 2 for n in range(10)]
+    squares = [n**2 for n in range(10)]
     ```
 
 ## 10. 클래스 작성 규칙

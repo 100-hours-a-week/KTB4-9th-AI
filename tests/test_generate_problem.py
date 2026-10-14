@@ -29,7 +29,7 @@ VALID_PROBLEM = {
     "input_format": "첫째 줄에 N이 주어진다.",
     "output_format": "방법의 수를 출력한다.",
     "problem_examples": [
-        {"input": "3", "output": "3", "explanation": "1+1+1, 1+2, 2+1"}
+        {"input": "3", "description": "1+1+1, 1+2, 2+1", "output": "3"}
     ],
     "input_constraints": [
         {
