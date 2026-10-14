@@ -10,7 +10,6 @@ from src.core.enums import (
 )
 from src.problem.graph import PARALLEL_NODES, build_graph
 from src.problem.nodes import semantic_validate as semantic_module
-from src.problem.nodes.semantic_validate import LogicVerdict
 from src.problem.state import (
     GraphState,
     ProblemExample,
@@ -218,15 +217,11 @@ async def test_이스케이프된_줄바꿈_예시도_의미검증을_통과한�
         ]
         return result
 
-    async def no_contradiction(prompt, cfg, schema):
-        return LogicVerdict(contradiction="none", reason="")
-
     async def judge0_like(code, language, stdin, limit):
         if "\\n" in stdin:
             return RunResult(status=ExecutionStatus.RUNTIME_ERROR, stderr="ValueError")
         return RunResult(status=ExecutionStatus.SUCCEEDED, stdout="2")
 
-    monkeypatch.setattr(semantic_module, "call_llm_structured", no_contradiction)
     monkeypatch.setattr(semantic_module, "run_code", judge0_like)
 
     graph = build_graph(
