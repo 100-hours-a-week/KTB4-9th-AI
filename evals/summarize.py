@@ -9,7 +9,7 @@
 
 요청 하나의 결과는 다음 중 하나다.
 - 통과: 의미 검증까지 통과
-- 폐기: 생성 형식 실패, 정적 검증 폐기, 의미 검증 폐기 (모델 탓)
+- 폐기: 생성 형식 실패, 정적 검증 폐기, 모순 검사 폐기, 의미 검증 폐기 (모델 탓)
 - 미확정: 아직 생성·채점 안 함, 또는 인프라 장애로 끝남 → 비율 계산에서 뺀다
 
 운영 검증은 실행 제한 값이 말이 되는지 보지 않는다 (judge0에 메모리 제한을 보내지
@@ -34,7 +34,7 @@ from evals.generate import GenerationRow, is_model_error
 from evals.requests import EvalRequest, load_requests
 from evals.score import ROWS_FILE as SCORES_FILE
 from evals.score import ScoreRow, generation_sha, is_infra_failure
-from src.core.enums import Category, Difficulty
+from src.core.enums import Category, Difficulty, DiscardReason
 
 PASSED = "PASSED"
 FORMAT_FAILED = "generate_problem:FORMAT_FAILED"  # 형식에 맞는 응답을 못 냄
@@ -42,6 +42,10 @@ NOT_GENERATED = "NOT_GENERATED"
 NOT_SCORED = "NOT_SCORED"
 INFRA = "INFRA"
 UNDETERMINED = {NOT_GENERATED, NOT_SCORED, INFRA}
+CONTRADICTION_REASONS = {
+    DiscardReason.PROBLEM_CONTRADICTION.value,
+    DiscardReason.CONSTRAINT_CONTRADICTION.value,
+}
 
 DUPLICATE_SIMILARITY = 0.87  # check_duplicate와 같은 기준
 
@@ -203,6 +207,17 @@ def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join(lines)
 
 
+def stage_of(result: str) -> str:
+    """결과 문자열에서 폐기 단계를 꺼낸다.
+
+    모순 검사가 semantic_validate 안에 있던 때의 결과도 check_contradiction으로 센다.
+    """
+    stage, _, reason = result.partition(":")
+    if reason in CONTRADICTION_REASONS:
+        return "check_contradiction"
+    return stage
+
+
 def overview_table(results: list[LabelResult]) -> str:
     headers = [
         "label",
@@ -213,6 +228,7 @@ def overview_table(results: list[LabelResult]) -> str:
         "**실질 통과율** (95% 구간)",
         "생성 형식 실패",
         "정적 검증 폐기",
+        "모순 검사 폐기",
         "의미 검증 폐기",
         "생성 시간 p50 / p90",
         "의미 검증 시도 평균",
@@ -225,7 +241,7 @@ def overview_table(results: list[LabelResult]) -> str:
         usable = sum(o.usable for o in determined)
         bad_limits = passed - usable
         low, high = wilson_interval(usable, total)
-        by_stage = Counter(o.result.split(":")[0] for o in determined)
+        by_stage = Counter(stage_of(o.result) for o in determined)
         gen_seconds = [
             o.generation.seconds
             for o in r.outcomes
@@ -246,6 +262,7 @@ def overview_table(results: list[LabelResult]) -> str:
                 f"**{pct(usable, total)}** ({low:.0%}~{high:.0%})" if total else "-",
                 pct(by_stage["generate_problem"], total),
                 pct(by_stage["static_validate"], total),
+                pct(by_stage["check_contradiction"], total),
                 pct(by_stage["semantic_validate"], total),
                 f"{seconds(percentile(gen_seconds, 50))} / "
                 f"{seconds(percentile(gen_seconds, 90))}",
