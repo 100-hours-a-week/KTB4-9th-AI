@@ -46,7 +46,9 @@ class ProblemExample(BaseModel):
 
     input: str
     description: str = Field(
-        description="input을 지문의 규칙대로 한 단계씩 계산하는 과정. output보다 먼저 쓴다."
+        description=(
+            "input을 지문의 규칙대로 한 단계씩 계산하는 과정. output보다 먼저 쓴다."
+        )
     )
     output: str = Field(description="description의 계산 결과와 일치해야 한다.")
 
