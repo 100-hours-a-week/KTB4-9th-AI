@@ -70,6 +70,18 @@ async def test_중복이면_폐기로_끝난다():
 
 
 @pytest.mark.asyncio
+async def test_모순이면_검증용_코드_생성_없이_폐기된다():
+    async def always_contradiction(state: GraphState) -> dict:
+        return discard(DiscardReason.PROBLEM_CONTRADICTION, "지문 모순")
+
+    state = await run({"check_contradiction": always_contradiction})
+
+    assert state.discard_reason == DiscardReason.PROBLEM_CONTRADICTION
+    assert state.discard_stage == "check_contradiction"
+    assert state.reference_code is None
+
+
+@pytest.mark.asyncio
 async def test_의미검증이_계속_실패하면_3회_재시도_후_폐기한다():
     async def always_fail(state: GraphState) -> dict:
         attempt = state.semantic_validation_attempt
