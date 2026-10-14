@@ -45,8 +45,10 @@ class ProblemExample(BaseModel):
     """problem_examples. 문제당 최대 3개 (display_order 1~3)"""
 
     input: str
-    output: str
-    description: str | None = None
+    description: str = Field(
+        description="input을 지문의 규칙대로 한 단계씩 계산하는 과정. output보다 먼저 쓴다."
+    )
+    output: str = Field(description="description의 계산 결과와 일치해야 한다.")
 
     @field_validator("input", "output")
     @classmethod
