@@ -126,7 +126,9 @@ def make_full_problem() -> Problem:
                 )
                 for lang in Language
             ],
-            "problem_examples": [ProblemExample(input="3 5", output="1")],
+            "problem_examples": [
+                ProblemExample(input="3 5", description="계산 과정", output="1")
+            ],
             "solution_keywords": ["해시맵"],
             "hidden_test_cases": [HiddenTestCase(input="1 2", output="0")],
             "hint_comments": [

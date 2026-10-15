@@ -25,7 +25,11 @@ async def make_state(**updates) -> GraphState:
     return state.model_copy(
         update={
             "reference_code": REFERENCE_CODE,
-            "problem_examples": [ProblemExample(input="5 6\n1 2 3 4 5", output="11")],
+            "problem_examples": [
+                ProblemExample(
+                    input="5 6\n1 2 3 4 5", description="계산 과정", output="11"
+                )
+            ],
             **updates,
         }
     )
@@ -79,7 +83,7 @@ def test_backslash_without_newline_escape_is_kept() -> None:
 
 
 def test_problem_example_normalizes_on_parse() -> None:
-    example = ProblemExample(input="2\\n3 4", output="7")
+    example = ProblemExample(input="2\\n3 4", description="계산 과정", output="7")
     assert example.input == "2\n3 4"
 
 
@@ -205,7 +209,11 @@ async def test_escaped_newline_reaches_judge0_as_real_newline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = await make_state(
-        problem_examples=[ProblemExample(input="5 6\\n1 2 3 4 5", output="11")]
+        problem_examples=[
+            ProblemExample(
+                input="5 6\\n1 2 3 4 5", description="계산 과정", output="11"
+            )
+        ]
     )
     seen = fix_run(monkeypatch, succeeded("11"))
 
@@ -244,8 +252,8 @@ async def test_every_example_is_checked(monkeypatch: pytest.MonkeyPatch) -> None
     runs = fix_run(monkeypatch, succeeded("11"))
     state = await make_state(
         problem_examples=[
-            ProblemExample(input="5 6", output="11"),
-            ProblemExample(input="1 2", output="11"),
+            ProblemExample(input="5 6", description="계산 과정", output="11"),
+            ProblemExample(input="1 2", description="계산 과정", output="11"),
         ]
     )
 

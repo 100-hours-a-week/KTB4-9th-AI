@@ -202,7 +202,7 @@ async def test_이스케이프된_줄바꿈_예시도_의미검증을_통과한�
     async def escaped_problem(state: GraphState) -> dict:
         result = await fake_nodes.generate_problem(state)
         result["problem_examples"] = [
-            ProblemExample(input="5 6\\n1 2 3 4 5", output="2")
+            ProblemExample(input="5 6\\n1 2 3 4 5", description="계산 과정", output="2")
         ]
         return result
 
