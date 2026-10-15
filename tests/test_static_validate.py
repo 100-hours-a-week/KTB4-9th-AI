@@ -157,3 +157,16 @@ async def test_Spring_컬럼_길이와_같으면_통과한다(field, limit):
     result = await static_validate(make_state(**{field: "가" * limit}))
 
     assert result == {"is_statically_validated": True}
+
+
+@pytest.mark.asyncio
+async def test_예시_input에_등호가_있으면_폐기한다():
+    examples = [
+        ProblemExample(
+            input="budget=10, prices=[5, 2, 3]",
+            description="계산 과정",
+            output="2",
+        )
+    ]
+    result = await static_validate(make_state(problem_examples=examples))
+    assert result["discard_reason"] == DiscardReason.VALIDATION_FAILED
