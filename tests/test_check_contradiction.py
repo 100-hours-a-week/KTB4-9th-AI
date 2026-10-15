@@ -20,6 +20,7 @@ async def make_state(**updates) -> GraphState:
             "problem_examples": [
                 ProblemExample(
                     input="5 6\n1 2 3 4 5",
+                    description="계산 과정",
                     output="11",
                 )
             ],
