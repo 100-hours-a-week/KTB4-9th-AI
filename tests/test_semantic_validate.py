@@ -233,6 +233,114 @@ async def test_check_examples_returns_none_when_all_match(
     assert await check_examples(state, limit) is None
 
 
+# ── 같은 실패 반복 시 조기 중단 ──────────────────────────────────────────
+
+
+def fix_run_by_input(
+    monkeypatch: pytest.MonkeyPatch, results: dict[str, RunResult]
+) -> None:
+    """예시 입력마다 다른 실행 결과를 돌려준다."""
+
+    async def fake(code, language, stdin, limit):
+        return results[stdin]
+
+    monkeypatch.setattr(module, "run_code", fake)
+
+
+def next_attempt(state: GraphState, result: dict) -> GraphState:
+    """노드 결과를 반영해 다음 시도의 상태를 만든다. 그래프가 하는 일과 같다."""
+    return state.model_copy(update=result)
+
+
+@pytest.mark.asyncio
+async def test_first_failure_is_recorded_for_next_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fix_run(monkeypatch, succeeded("99"))
+
+    result = await semantic_validate(await make_state())
+
+    assert "is_discarded" not in result
+    assert result["last_semantic_failure"]
+
+
+@pytest.mark.asyncio
+async def test_same_mismatch_twice_is_discarded_early(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """코드를 다시 만들어도 같은 오답이면 문제 결함으로 보고 남은 횟수를 쓰지 않는다."""
+    fix_run(monkeypatch, succeeded("99"))
+    state = await make_state()
+    first = await semantic_validate(state)
+
+    fix_run(monkeypatch, succeeded("99  \n"))  # 정규화하면 같은 출력
+    result = await semantic_validate(next_attempt(state, first))
+
+    assert result["is_discarded"] is True
+    assert result["discard_reason"] == DiscardReason.EXAMPLE_MISMATCH
+    assert "같은 실패 반복" in result["discard_detail"]
+    assert result["semantic_validation_attempt"] == 2  # max_attempt=3보다 먼저
+
+
+@pytest.mark.asyncio
+async def test_different_mismatch_keeps_retrying(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fix_run(monkeypatch, succeeded("99"))
+    state = await make_state()
+    first = await semantic_validate(state)
+
+    fix_run(monkeypatch, succeeded("98"))
+    result = await semantic_validate(next_attempt(state, first))
+
+    assert "is_discarded" not in result
+    assert result["last_semantic_failure"] != first["last_semantic_failure"]
+
+
+@pytest.mark.asyncio
+async def test_same_runtime_status_twice_is_discarded_early(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """stderr 내용이 달라도 같은 예시에서 같은 실행 상태면 같은 실패로 본다."""
+    fix_run(
+        monkeypatch,
+        RunResult(status=ExecutionStatus.RUNTIME_ERROR, stderr="line 3\nIndexError"),
+    )
+    state = await make_state()
+    first = await semantic_validate(state)
+
+    fix_run(
+        monkeypatch,
+        RunResult(status=ExecutionStatus.RUNTIME_ERROR, stderr="line 7\nKeyError"),
+    )
+    result = await semantic_validate(next_attempt(state, first))
+
+    assert result["is_discarded"] is True
+    assert result["discard_reason"] == DiscardReason.REFERENCE_CODE_FAILED
+    assert "같은 실패 반복" in result["discard_detail"]
+
+
+@pytest.mark.asyncio
+async def test_same_status_on_another_example_keeps_retrying(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timed_out = RunResult(status=ExecutionStatus.TIMED_OUT)
+    state = await make_state(
+        problem_examples=[
+            ProblemExample(input="5 6", description="계산 과정", output="11"),
+            ProblemExample(input="1 2", description="계산 과정", output="3"),
+        ]
+    )
+    fix_run_by_input(monkeypatch, {"5 6": timed_out, "1 2": timed_out})
+    first = await semantic_validate(state)
+
+    fix_run_by_input(monkeypatch, {"5 6": succeeded("11"), "1 2": timed_out})
+    result = await semantic_validate(next_attempt(state, first))
+
+    assert "is_discarded" not in result
+    assert result["is_semantically_valid"] is False
+
+
 # ── 사전 조건 ──────────────────────────────────────────────────────────
 
 

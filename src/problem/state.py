@@ -183,6 +183,9 @@ class GraphState(BaseModel):
     is_semantically_valid: bool = False
     semantic_validation_attempt: int = 0
     semantic_validation_max_attempt: int = 3
+    # 직전 시도의 실패 지점(예시 번호 + 실행 결과 또는 실행 상태).
+    # 같은 실패가 반복되면 재시도해도 소용없다고 보고 바로 폐기한다.
+    last_semantic_failure: str | None = None
 
     # ---- 폐기 이유 (병렬 노드가 동시에 써도 되도록 리듀서를 둔다)
     is_discarded: Annotated[bool, keep_discard_flag] = False
