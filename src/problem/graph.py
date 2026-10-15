@@ -4,6 +4,7 @@ from functools import lru_cache
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from src.problem.nodes.check_contradiction import check_contradiction
 from src.problem.nodes.check_duplicate import check_duplicate
 from src.problem.nodes.discard_problem import discard_problem
 from src.problem.nodes.finalize import finalize
@@ -56,6 +57,7 @@ DEFAULT_NODES: dict[str, NodeFn] = {
     "generate_problem": generate_problem,
     "static_validate": static_validate,
     "check_duplicate": check_duplicate,
+    "check_contradiction": check_contradiction,
     "generate_ref_code": generate_ref_code,
     "semantic_validate": semantic_validate,
     "generate_testcase": generate_testcase,
@@ -73,7 +75,14 @@ def route_after_static(state: GraphState) -> str:
 
 
 def route_after_duplicate(state: GraphState) -> str:
-    """중복이면 폐기, 신규면 검증용 코드 생성으로 보낸다."""
+    """중복이면 폐기, 신규면 지문 모순 검사로 보낸다."""
+    if state.is_discarded:
+        return "discard_problem"
+    return "check_contradiction"
+
+
+def route_after_contradiction(state: GraphState) -> str:
+    """지문 모순 검사 결과에 따라 모순이면 폐기, 아니면 검증용 코드 생성으로 보낸다."""
     if state.is_discarded:
         return "discard_problem"
     return "generate_ref_code"
@@ -124,6 +133,11 @@ def build_graph(overrides: dict[str, NodeFn] | None = None) -> CompiledStateGrap
     builder.add_conditional_edges(
         "check_duplicate",
         route_after_duplicate,
+        ["check_contradiction", "discard_problem"],
+    )
+    builder.add_conditional_edges(
+        "check_contradiction",
+        route_after_contradiction,
         ["generate_ref_code", "discard_problem"],
     )
     builder.add_edge("generate_ref_code", "semantic_validate")

@@ -60,6 +60,11 @@ async def check_duplicate(state: GraphState) -> dict:
     return {}
 
 
+async def check_contradiction(state: GraphState) -> dict:
+    """항상 통과로 판정한다."""
+    return {}
+
+
 async def generate_ref_code(state: GraphState) -> dict:
     """고정 레퍼런스 코드를 반환한다."""
     return {"reference_code": "print(2)", "reference_language": Language.PYTHON}
@@ -95,6 +100,7 @@ async def discard_problem(state: GraphState) -> dict:
 OFFLINE_NODES = {
     # LLM 호출
     "generate_problem": generate_problem,
+    "check_contradiction": check_contradiction,
     "generate_ref_code": generate_ref_code,
     "semantic_validate": semantic_validate,
     "generate_testcase": generate_testcase,

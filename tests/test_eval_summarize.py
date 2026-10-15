@@ -173,6 +173,49 @@ def test_실행_제한이_비정상이면_실질_통과에서_뺀다():
     assert "| 100% | 1 (50%) | **50%**" in table
 
 
+def overview_cells(table: str) -> dict[str, str]:
+    """overview_table의 첫 행을 열 이름 → 값으로 읽는다."""
+    header, _, row = table.splitlines()[:3]
+    names = [cell.strip() for cell in header.strip("|").split("|")]
+    values = [cell.strip() for cell in row.strip("|").split("|")]
+    return dict(zip(names, values, strict=True))
+
+
+def test_모순_검사_폐기를_의미_검증과_따로_센다():
+    result = label_result(
+        "a",
+        [
+            PASSED,
+            PASSED,
+            "check_contradiction:PROBLEM_CONTRADICTION",
+            "semantic_validate:EXAMPLE_MISMATCH",
+        ],
+    )
+
+    cells = overview_cells(overview_table([result]))
+
+    assert cells["모순 검사 폐기"] == "25%"
+    assert cells["의미 검증 폐기"] == "25%"
+
+
+def test_예전_결과의_모순_폐기도_모순_검사로_센다():
+    """모순 검사가 semantic_validate 안에 있던 때의 결과도 같은 열로 비교한다."""
+    result = label_result(
+        "old",
+        [
+            PASSED,
+            "semantic_validate:PROBLEM_CONTRADICTION",
+            "semantic_validate:CONSTRAINT_CONTRADICTION",
+            "semantic_validate:EXAMPLE_MISMATCH",
+        ],
+    )
+
+    cells = overview_cells(overview_table([result]))
+
+    assert cells["모순 검사 폐기"] == "50%"
+    assert cells["의미 검증 폐기"] == "25%"
+
+
 @pytest.mark.parametrize(
     ("memory", "time_ms", "expected"),
     [

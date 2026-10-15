@@ -11,8 +11,8 @@ load_dotenv(ENV_FILE, override=False)
 
 class LLMModels(BaseModel):
     generate_problem: str = "gemini-3.8-flash"
+    check_contradiction: str = "gemini-3.8-flash"
     generate_ref_code: str = "gemini-3.5-flash-lite"
-    semantic_validate: str = "gemini-3.8-flash"
     generate_nl_keyword: str = "gemini-3.5-flash-lite"
     generate_testcase: str = "gemini-3.5-flash-lite"
     generate_solution_code: str = "gemini-3.5-flash-lite"

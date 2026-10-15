@@ -104,9 +104,11 @@ class DiscardReason(StrEnum):
     # 중복 검사 (check_duplicate)
     DUPLICATE = "DUPLICATE"  # 기존 문제와 유사도가 기준 이상
 
-    # 의미 검증 (semantic_validate)
+    # 모순 검사 (check_contradiction)
     PROBLEM_CONTRADICTION = "PROBLEM_CONTRADICTION"  # 지문 자체가 모순
     CONSTRAINT_CONTRADICTION = "CONSTRAINT_CONTRADICTION"  # 지문과 제약이 모순
+
+    # 의미 검증 (semantic_validate)
     EXAMPLE_MISMATCH = "EXAMPLE_MISMATCH"  # 레퍼런스 코드 실행 결과 != 예시 출력
     REFERENCE_CODE_FAILED = "REFERENCE_CODE_FAILED"  # 레퍼런스 코드 실행 자체가 실패
     MAX_ATTEMPT_EXCEEDED = "MAX_ATTEMPT_EXCEEDED"  # 재시도 한도 초과
