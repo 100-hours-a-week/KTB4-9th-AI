@@ -30,6 +30,42 @@ MINUTES = 60
 app = modal.App(APP_NAME)
 volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 
+
+def get_gpu_config() -> tuple[any, int]:
+    """
+    MODAL_GPU_TYPE 환경 변수에 따라 적절한 GPU 리소스와 텐서 병렬 크기(TP)를 반환한다.
+
+    지원 기종:
+        - H200 (기본값, 141GB VRAM, 122B-FP8 권장)
+        - B200 (180GB VRAM, 초대형 모델 권장)
+        - 2xA100 (160GB VRAM, 2장 분산 병렬)
+        - A100 (80GB VRAM, 27B 병합 모델 권장)
+        - L4 (24GB VRAM, W4A16 양자화 모델 권장)
+        - L40S (48GB VRAM)
+    """
+    gpu_type = os.environ.get("MODAL_GPU_TYPE", "H200").upper().strip()
+
+    if gpu_type == "H200":
+        return modal.gpu.H200(), 1
+    if gpu_type == "B200":
+        return modal.gpu.B200(), 1
+    if gpu_type in ("2XA100", "2XA100-80GB", "2X_A100"):
+        return modal.gpu.A100(count=2, size="80GB"), 2
+    if gpu_type in ("A100", "A100-80GB"):
+        return modal.gpu.A100(size="80GB"), 1
+    if gpu_type in ("A100-40GB",):
+        return modal.gpu.A100(size="40GB"), 1
+    if gpu_type == "L4":
+        return modal.gpu.L4(), 1
+    if gpu_type == "L40S":
+        return modal.gpu.L40S(), 1
+
+    # 기타 사용자 정의 기종
+    return gpu_type, 1
+
+
+SELECTED_GPU, TENSOR_PARALLEL_SIZE = get_gpu_config()
+
 # 최신 vLLM 및 Qwen3.5 지원을 위한 transformers >= 5.0 설치
 vllm_image = (
     modal.Image.from_registry("nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.11")
@@ -45,8 +81,8 @@ vllm_image = (
 
 @app.cls(
     image=vllm_image,
-    # 122B-FP8 모델(약 120GB)을 단일 GPU에 올리기 위해 H200 (141GB VRAM) 기본 할당
-    gpu=modal.gpu.H200(),
+    # 환경 변수 MODAL_GPU_TYPE으로 동적 선택 (기본값: H200 141GB)
+    gpu=SELECTED_GPU,
     volumes={CACHE_DIR: volume},
     # 60초 유휴 시 컨테이너를 0대로 자동 축소하여 유휴 비용 방어
     scaledown_window=60,
@@ -87,7 +123,7 @@ class ModelServer:
             "--host",
             "0.0.0.0",
             "--tensor-parallel-size",
-            "1",
+            str(TENSOR_PARALLEL_SIZE),
             "--max-model-len",
             "8192",
             # Qwen3.5 계열 추론 토큰(<think>) 노출을 서버 레벨에서 원천 차단

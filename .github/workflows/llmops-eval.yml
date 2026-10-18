@@ -18,6 +18,18 @@ on:
         description: "프롬프트 버전"
         required: false
         default: "generate_problem/v11"
+      gpu_type:
+        description: "추론에 사용할 GPU 기종 선택"
+        required: false
+        default: "H200"
+        type: choice
+        options:
+          - H200
+          - B200
+          - 2xA100
+          - A100
+          - L4
+          - L40S
       limit:
         description: "평가할 요청 건수 (0이면 72건 전체, 스모크 테스트 시 4건 등)"
         required: false
@@ -39,6 +51,7 @@ jobs:
 
     env:
       LABEL: eval-${{ github.run_id }}
+      MODAL_GPU_TYPE: ${{ inputs.gpu_type }}
       VLLM_URL: ${{ secrets.VLLM_URL }}
       VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
