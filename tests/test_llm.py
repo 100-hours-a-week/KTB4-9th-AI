@@ -63,6 +63,21 @@ def test_인라인_백틱으로_감싼_코드를_벗긴다():
     assert strip_code_fence("`print(1)`") == "print(1)"
 
 
+def test_gemini_모델이면_temperature를_버린다():
+    cfg = LLMConfig(model_name="gemini-3.5-flash-lite", temperature=0.3)
+    assert cfg.temperature is None
+
+
+def test_gemini_모델이_아니면_temperature를_유지한다():
+    cfg = LLMConfig(model_name="gpt-6.1-sol", temperature=0.3)
+    assert cfg.temperature == 0.3
+
+
+def test_모델명이_없으면_temperature를_유지한다():
+    cfg = LLMConfig(model_name=None, temperature=0.3)
+    assert cfg.temperature == 0.3
+
+
 @pytest.mark.asyncio
 async def test_구조화_응답을_지정한_형식으로_돌려준다(monkeypatch):
     fix_chat_model(monkeypatch, FakeRunnable(result=Score(score=90)))

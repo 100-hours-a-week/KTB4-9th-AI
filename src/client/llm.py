@@ -3,11 +3,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, model_validator
 
 from src.core.config import get_settings
 from src.core.exception import LLMOutputParseError
@@ -35,6 +35,13 @@ class LLMConfig(BaseModel):
     temperature: float | None = None
     top_k: int | None = 3
 
+    @model_validator(mode="after")
+    def drop_ignored_temperature(self) -> Self:
+        # 운영에서 쓰는 gemini 모델(3.5-flash-lite, 3.8-flash)은 temperature를 무시함
+        if self.model_name and is_gemini_model(self.model_name):
+            self.temperature = None
+        return self
+
 
 class LocalModel(BaseModel):
     """vLLM 같은 OpenAI 호환 서버에 띄운 모델. 평가에서만 쓴다.
@@ -50,6 +57,18 @@ class LocalModel(BaseModel):
 
 # 설정돼 있으면 이 컨텍스트 안의 call_llm_structured가 Gemini 대신 이 모델을 부른다
 _local_model: ContextVar[LocalModel | None] = ContextVar("local_model", default=None)
+
+
+def is_gemini_model(model_name: str) -> bool:
+    """gemini 모델인지 확인한다.
+
+    Parameters:
+        model_name (str): 모델 이름
+
+    Returns:
+        bool: gemini 모델이면 True
+    """
+    return model_name.lower().startswith("gemini-")
 
 
 @contextmanager
