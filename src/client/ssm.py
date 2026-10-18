@@ -5,9 +5,8 @@
 """
 
 import logging
+import os
 import time
-
-from src.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +25,19 @@ def clear_ssm_cache() -> None:
     _cached_at = 0.0
 
 
-def get_active_model_version(force_refresh: bool = False) -> str | None:
+def get_active_model_version(
+    default_model: str | None = None,
+    force_refresh: bool = False,
+) -> str | None:
     """
     AWS SSM Parameter Store에서 운영 승인된 모델 버전을 조회한다.
 
     Parameters:
+        default_model (str | None): SSM 조회 실패 시 반환할 기본 모델명 (예: 'Qwen/Qwen3.5-122B-A10B-FP8').
         force_refresh (bool): True이면 캐시를 무시하고 SSM을 직접 조회한다.
 
     Returns:
-        str | None: 승인된 모델 식별자 (예: 'Qwen/Qwen3.5-122B-A10B-FP8').
-                    조회 실패 또는 미설정 시 None 반환.
+        str | None: 승인된 모델 식별자 문자열. 조회 실패 시 default_model 반환.
     """
     global _cached_model_version, _cached_at
 
@@ -43,14 +45,23 @@ def get_active_model_version(force_refresh: bool = False) -> str | None:
     if not force_refresh and _cached_model_version and (now - _cached_at < _CACHE_TTL_SECONDS):
         return _cached_model_version
 
-    settings = get_settings()
-    param_name = settings.ssm_model_version_param
+    param_name = os.getenv("SSM_MODEL_VERSION_PARAM", "/cosmos/prod/model_version")
+    aws_region = os.getenv("AWS_REGION", "ap-northeast-2")
+
+    try:
+        from src.core.config import get_settings
+
+        settings = get_settings()
+        param_name = getattr(settings, "ssm_model_version_param", param_name)
+        aws_region = getattr(settings, "aws_region", aws_region)
+    except Exception:
+        pass
 
     try:
         import boto3
         from botocore.exceptions import BotoCoreError, ClientError
 
-        ssm_client = boto3.client("ssm", region_name=settings.aws_region)
+        ssm_client = boto3.client("ssm", region_name=aws_region)
         response = ssm_client.get_parameter(Name=param_name, WithDecryption=False)
         val = response.get("Parameter", {}).get("Value")
         if val:
@@ -71,4 +82,4 @@ def get_active_model_version(force_refresh: bool = False) -> str | None:
             error,
         )
 
-    return None
+    return default_model

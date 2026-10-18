@@ -1,5 +1,3 @@
-import asyncio
-import logging
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -11,22 +9,17 @@ from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, ValidationError
 
-from src.client.ssm import get_active_model_version
 from src.core.config import get_settings
-from src.core.enums import Trigger
 from src.core.exception import LLMOutputParseError
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
-
-logger = logging.getLogger(__name__)
 
 FENCE_PATTERN = re.compile(r"^```[a-zA-Z]*\n(.*?)\n?```$", re.DOTALL)
 
 __all__ = [
     "build_chat_model",
     "call_llm_structured",
-    "call_modal_structured",
     "current_local_model",
     "strip_code_fence",
     "use_local_model",
@@ -41,8 +34,6 @@ class LLMConfig(BaseModel):
     prompt_version: str | None = None
     temperature: float | None = None
     top_k: int | None = 3
-    trigger: Trigger | None = None
-    node_name: str | None = None
 
 
 class LocalModel(BaseModel):
@@ -131,87 +122,15 @@ def build_chat_model(cfg: LLMConfig) -> ChatGoogleGenerativeAI:
     return ChatGoogleGenerativeAI(**options)
 
 
-async def _call_gemini_structured[T: BaseModel](
-    prompt: str, cfg: LLMConfig, schema: type[T]
-) -> T:
-    """Gemini API를 호출해 구조화된 객체로 반환한다."""
-    structured = build_chat_model(cfg).with_structured_output(schema)
-    try:
-        result = await structured.ainvoke(prompt)
-    except (OutputParserException, ValueError) as error:
-        raise LLMOutputParseError(f"구조화 응답 해석 실패: {error}") from error
-
-    if not isinstance(result, schema):
-        raise LLMOutputParseError("구조화 응답이 비어 있음")
-    return result
-
-
-async def call_modal_structured[T: BaseModel](
-    prompt: str, cfg: LLMConfig, schema: type[T]
-) -> T:
-    """
-    Modal 서버리스 vLLM 엔드포인트를 호출하고 응답 형식의 객체로 반환한다.
-
-    AWS SSM Parameter Store에서 운영 모델 버전을 조회하며,
-    일시적인 네트워크 순단이나 콜드 스타트 지연 시 최대 3회(지수 백오프) 재시도한다.
-    모든 재시도 실패 시 BATCH_FALLBACK_TO_GEMINI 설정에 따라 Gemini API로 비상 폴백한다.
-    """
-    settings = get_settings()
-    active_model = get_active_model_version() or cfg.model_name or "Qwen/Qwen3.5-122B-A10B-FP8"
-
-    modal_model = LocalModel(
-        model_name=active_model,
-        chat_template_kwargs={"enable_thinking": False},
-        temperature=cfg.temperature,
-        timeout_s=settings.modal_request_timeout,
-    )
-
-    max_retries = max(1, settings.modal_max_retries)
-    last_error: Exception | None = None
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.info(
-                "Modal vLLM 추론 요청 (%d/%d회 시도): 모델=%s, 엔드포인트=%s",
-                attempt,
-                max_retries,
-                active_model,
-                settings.vllm_url,
-            )
-            return await call_local_structured(prompt, modal_model, schema)
-        except Exception as error:  # noqa: BLE001
-            last_error = error
-            logger.warning(
-                "Modal 추론 호출 실패 (%d/%d회 시도): %s",
-                attempt,
-                max_retries,
-                error,
-            )
-            if attempt < max_retries:
-                backoff_seconds = 2 ** (attempt - 1)
-                await asyncio.sleep(backoff_seconds)
-
-    if settings.batch_fallback_to_gemini:
-        logger.warning(
-            "Modal 엔드포인트 호출 %d회 최종 실패: Gemini API로 비상 폴백합니다. 에러: %s",
-            max_retries,
-            last_error,
-        )
-        return await _call_gemini_structured(prompt, cfg, schema)
-
-    raise LLMOutputParseError(f"Modal 엔드포인트 호출 최종 실패: {last_error}") from last_error
-
-
 async def call_llm_structured[T: BaseModel](
     prompt: str, cfg: LLMConfig, schema: type[T]
 ) -> T:
     """
-    응답 형식을 지정해 LLM을 호출하고 그 형식의 객체로 반환한다.
+    응답 형식을 지정해 Gemini를 호출하고 그 형식의 객체로 반환한다.
 
-    1. use_local_model 블록 안이면(평가 실행 시) 지정된 로컬 모델을 부른다.
-    2. 새벽 정기 배치(Trigger.BATCH)의 문제 출제 노드(generate_problem)이고 VLLM_URL이 설정된 경우
-       SSM에서 승인된 모델을 읽어 Modal 서버리스 엔드포인트로 호출한다 (실패 시 Gemini 비상 폴백).
-    3. 그 외 주간 실시간 요청(Trigger.ON_DEMAND) 및 검증 노드는 Gemini API를 호출한다.
+    모든 노드의 LLM 호출은 이 함수를 사용한다.
+    노드마다 모델 설정(cfg)과 응답 형식(schema)을 다르게 넘긴다.
+    use_local_model 블록 안이면 Gemini 대신 그 로컬 모델을 부른다.
 
     Parameters:
         prompt (str): 완성된 프롬프트
@@ -228,12 +147,15 @@ async def call_llm_structured[T: BaseModel](
     if local is not None:
         return await call_local_structured(prompt, local, schema)
 
-    if cfg.trigger == Trigger.BATCH and cfg.node_name == "generate_problem":
-        settings = get_settings()
-        if settings.vllm_url:
-            return await call_modal_structured(prompt, cfg, schema)
+    structured = build_chat_model(cfg).with_structured_output(schema)
+    try:
+        result = await structured.ainvoke(prompt)
+    except (OutputParserException, ValueError) as error:
+        raise LLMOutputParseError(f"구조화 응답 해석 실패: {error}") from error
 
-    return await _call_gemini_structured(prompt, cfg, schema)
+    if not isinstance(result, schema):
+        raise LLMOutputParseError("구조화 응답이 비어 있음")
+    return result
 
 
 @lru_cache

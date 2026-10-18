@@ -46,16 +46,9 @@ class Settings(BaseSettings):
 
     llm_models: LLMModels = LLMModels()
 
-    # 평가 및 배치 추론용 vLLM / Modal 서버리스 엔드포인트
+    # 평가용 로컬 모델 서버 (Colab vLLM + ngrok). 운영 경로에서는 쓰지 않는다
     vllm_url: str | None = None
     vllm_api_key: str | None = None
-
-    # AWS SSM Parameter Store 및 Modal 새벽 배치 서빙 설정
-    ssm_model_version_param: str = "/cosmos/prod/model_version"
-    aws_region: str = "ap-northeast-2"
-    batch_fallback_to_gemini: bool = True
-    modal_request_timeout: float = 120.0
-    modal_max_retries: int = 3
 
     backend_url: str = "http://localhost:8080"
 

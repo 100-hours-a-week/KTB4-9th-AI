@@ -209,8 +209,6 @@ async def generate_problem(state: GraphState) -> dict:
         model_name=get_settings().llm_models.generate_problem,
         prompt_version=PROMPT_VERSION,
         top_k=1,
-        trigger=state.trigger,
-        node_name="generate_problem",
     )
 
     category = resolve_category(state.requested_category)

@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-from src.client import ssm as ssm_module
 from src.client.ssm import clear_ssm_cache, get_active_model_version
 
 
@@ -62,3 +61,22 @@ def test_SSM_에러_발생_시_None을_반환한다(monkeypatch):
     monkeypatch.setattr("boto3.client", fake_boto3.client)
 
     assert get_active_model_version() is None
+
+
+def test_SSM_조회_실패_시_default_model을_반환한다(monkeypatch):
+    clear_ssm_cache()
+
+    class ErrorSSMClient:
+        def get_parameter(self, Name, WithDecryption):
+            from botocore.exceptions import ClientError
+
+            raise ClientError(
+                {"Error": {"Code": "ParameterNotFound", "Message": "Not found"}},
+                "GetParameter",
+            )
+
+    fake_boto3 = SimpleNamespace(client=lambda service, region_name: ErrorSSMClient())
+    monkeypatch.setattr("boto3.client", fake_boto3.client)
+
+    result = get_active_model_version(default_model="fallback-model-name")
+    assert result == "fallback-model-name"
