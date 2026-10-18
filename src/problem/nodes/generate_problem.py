@@ -3,7 +3,7 @@ import random
 
 from pydantic import BaseModel, Field
 
-from src.client.llm import LLMConfig, call_llm_structured
+from src.client.llm import LLMConfig, call_llm_structured, called_config
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, Language
 from src.db.repository import FewshotSeedRepository
@@ -234,5 +234,5 @@ async def generate_problem(state: GraphState) -> dict:
         "input_constraints": problem.input_constraints,
         "execution_limits": problem.execution_limits,
         "problem_examples": problem.problem_examples,
-        "node_models": {"generate_problem": cfg},
+        "node_models": {"generate_problem": called_config(cfg)},
     }

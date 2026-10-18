@@ -4,10 +4,13 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
+from src.client.llm import LocalModel, use_local_model
+from src.core.config import get_settings
 from src.core.enums import Category, ConstraintDataType, Difficulty, Language
 from src.core.exception import LLMOutputParseError
 from src.problem.nodes import generate_problem as module
 from src.problem.nodes.generate_problem import (
+    PROMPT_VERSION,
     RESPONSE_CATEGORIES,
     GeneratedProblem,
     build_prompt,
@@ -137,6 +140,29 @@ async def test_구조화_응답을_상태_필드로_옮긴다(monkeypatch):
     assert result["input_constraints"][1].data_type == ConstraintDataType.LONG
     assert len(result["execution_limits"]) == 4
     assert "generate_problem" in result["node_models"]
+
+
+@pytest.mark.asyncio
+async def test_로컬_모델_블록_밖이면_설정의_Gemini_모델을_기록한다(monkeypatch):
+    fix_structured_response(monkeypatch, result=make_problem())
+    result = await generate_problem(make_state())
+
+    recorded = result["node_models"]["generate_problem"]
+    assert recorded.model_name == get_settings().llm_models.generate_problem
+    assert recorded.temperature is None
+    assert recorded.prompt_version == PROMPT_VERSION
+
+
+@pytest.mark.asyncio
+async def test_로컬_모델_블록_안이면_실제로_부른_모델을_기록한다(monkeypatch):
+    fix_structured_response(monkeypatch, result=make_problem())
+    with use_local_model(LocalModel(model_name="qwen-test", temperature=0.6)):
+        result = await generate_problem(make_state())
+
+    recorded = result["node_models"]["generate_problem"]
+    assert recorded.model_name == "qwen-test", "Gemini 이름이 남으면 분석이 틀린다"
+    assert recorded.temperature == 0.6
+    assert recorded.prompt_version == PROMPT_VERSION
 
 
 @pytest.mark.asyncio
