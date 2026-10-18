@@ -21,6 +21,7 @@ __all__ = [
     "build_chat_model",
     "call_llm_structured",
     "current_local_model",
+    "called_config",
     "strip_code_fence",
     "use_local_model",
     "LLMConfig",
@@ -92,6 +93,29 @@ def use_local_model(model: LocalModel) -> Iterator[None]:
 def current_local_model() -> LocalModel | None:
     """지금 컨텍스트에서 쓰는 로컬 모델. 없으면 None (Gemini)."""
     return _local_model.get()
+
+
+def called_config(cfg: LLMConfig) -> LLMConfig:
+    """
+    실제로 호출한 모델 기준의 설정. node_models에 기록할 때 쓴다.
+
+    use_local_model 블록 안이면 call_llm_structured가 cfg 대신 로컬 모델을
+    부르므로, 모델명과 temperature를 그 로컬 모델 값으로 바꾼다.
+    LLM을 호출한 것과 같은 블록 안에서 불러야 한다.
+
+    Parameters:
+        cfg (LLMConfig): 노드가 call_llm_structured에 넘긴 설정
+
+    Returns:
+        LLMConfig: 블록 밖이면 cfg 그대로, 안이면 로컬 모델 값으로 바꾼 사본
+    """
+    local = _local_model.get()
+    if local is None:
+        return cfg
+    # temperature가 None이어도 덮어써야 cfg의 값이 기록에 남지 않는다
+    return cfg.model_copy(
+        update={"model_name": local.model_name, "temperature": local.temperature}
+    )
 
 
 def strip_code_fence(text: str) -> str:
