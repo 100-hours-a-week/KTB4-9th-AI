@@ -20,7 +20,7 @@ from src.problem.state import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "generate_problem/v9"
+PROMPT_VERSION = "generate_problem/v11"
 
 GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 
@@ -37,13 +37,25 @@ GENERATE_PROBLEM_PROMPT = """당신은 코딩 테스트 문제 출제자다.
 - problem_content는 상황 설명, 요구할 것, 추가 조건을 각각 빈 줄로 나눠 쓴다.
   한 덩어리로 이어 쓰지 않는다. 사용자가 모바일 화면에서 읽는다.
 - difficulty에는 요청 난이도 {difficulty}를 그대로 적는다.
-- 공개 예시는 1~3개이며, 모든 예시는 제약 조건을 만족해야 한다.
-- 예시의 output은 input을 실제로 풀었을 때 나오는 정확한 값이어야 한다.
-  예시를 적기 전에 input을 지문의 규칙대로 한 단계씩 직접 계산하고,
-  그 결과를 output에 적는다. 계산 과정을 건너뛰고 짐작으로 적지 않는다.
-  지문에 제약이 있으면 예시가 그 제약을 어기지 않는지 확인한다.
-- 예시 input은 손으로 계산할 수 있는 작은 크기로 만든다.
-  큰 입력은 hidden_test_cases에서 다룬다.
+- input_format과 output_format은 표준 입력·출력 형식으로 적는다.
+  프로그램이 읽을 값을 줄 단위로 설명한다.
+  변수명 대입(N=3), 대괄호 목록([1, 2, 3]),
+  타입 표기(List[INT])를 쓰지 않는다.
+  나쁜 예: "budget (INT), prices (LIST[INT])"
+  좋은 예: "첫째 줄에 예산 B와 물건 개수 N이 공백으로 구분되어
+  주어진다. 둘째 줄에 N개의 가격이 공백으로 구분되어 주어진다."
+- 예시 input은 그 형식대로 실제 입력될 내용만 적는다.
+  등호나 변수명을 쓰지 않고, 줄이 나뉘면 줄바꿈으로 나눈다.
+  나쁜 예: "budget=10, prices=[5, 2, 3]"
+  좋은 예: 첫 줄 "10 3", 둘째 줄 "5 2 3"
+- 공개 예시는 1~3개이며, 모든 예시는 앞서 적은 input_constraints를 만족해야 한다.
+- 예시는 input, description, output을 이 순서로 적는다.
+  input: 손으로 계산할 수 있는 작은 크기로 만든다.
+    큰 입력은 hidden_test_cases에서 다룬다.
+  description: 이 input을 지문의 규칙대로 한 단계씩 계산하는 과정을 적는다.
+    중간 값을 모두 드러내고 마지막에 최종 결과를 쓴다. 비워 두지 않는다.
+  output: description에서 나온 최종 결과를 그대로 적는다.
+    계산 없이 짐작으로 적지 않는다.
 - input_constraints에는 입력 항목(scope: INPUT)과
   출력(scope: OUTPUT, target: output)을 모두 적는다.
 - data_type이 숫자형(INT, LONG, FLOAT, DOUBLE)일 때만
@@ -76,9 +88,9 @@ class GeneratedProblem(BaseModel):
     problem_content: str
     input_format: str
     output_format: str
-    problem_examples: list[ProblemExample]
     input_constraints: list[InputConstraint]
     execution_limits: list[ExecutionLimit]
+    problem_examples: list[ProblemExample]
 
 
 def resolve_category(requested: str) -> Category:
@@ -219,8 +231,8 @@ async def generate_problem(state: GraphState) -> dict:
         "problem_content": problem.problem_content,
         "input_format": problem.input_format,
         "output_format": problem.output_format,
-        "problem_examples": problem.problem_examples,
         "input_constraints": problem.input_constraints,
         "execution_limits": problem.execution_limits,
+        "problem_examples": problem.problem_examples,
         "node_models": {"generate_problem": cfg},
     }

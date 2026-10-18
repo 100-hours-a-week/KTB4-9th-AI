@@ -45,8 +45,12 @@ class ProblemExample(BaseModel):
     """problem_examples. 문제당 최대 3개 (display_order 1~3)"""
 
     input: str
-    output: str
-    description: str | None = None
+    description: str = Field(
+        description=(
+            "input을 지문의 규칙대로 한 단계씩 계산하는 과정. output보다 먼저 쓴다."
+        )
+    )
+    output: str = Field(description="description의 계산 결과와 일치해야 한다.")
 
     @field_validator("input", "output")
     @classmethod
@@ -179,6 +183,9 @@ class GraphState(BaseModel):
     is_semantically_valid: bool = False
     semantic_validation_attempt: int = 0
     semantic_validation_max_attempt: int = 3
+    # 직전 시도의 실패 지점(예시 번호 + 실행 결과 또는 실행 상태).
+    # 같은 실패가 반복되면 재시도해도 소용없다고 보고 바로 폐기한다.
+    last_semantic_failure: str | None = None
 
     # ---- 폐기 이유 (병렬 노드가 동시에 써도 되도록 리듀서를 둔다)
     is_discarded: Annotated[bool, keep_discard_flag] = False

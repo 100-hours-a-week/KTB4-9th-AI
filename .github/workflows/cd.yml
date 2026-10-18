@@ -3,7 +3,7 @@ name: AI CD
 on:
   workflow_run:
     workflows: [ "AI CI" ]
-    branches: [ main ]
+    branches: [ develop ]
     types:
       - completed
   workflow_dispatch:
@@ -24,10 +24,10 @@ jobs:
     # CI 워크플로우가 'success'로 끝났을 때만 배포 진행
     if: >-
       ${{
-        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop') ||
         (github.event_name == 'workflow_run' &&
          github.event.workflow_run.event == 'push' &&
-         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.head_branch == 'develop' &&
          github.event.workflow_run.conclusion == 'success')
       }}
 

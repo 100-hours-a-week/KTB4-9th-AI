@@ -10,7 +10,6 @@ from src.core.enums import (
 )
 from src.problem.graph import PARALLEL_NODES, build_graph
 from src.problem.nodes import semantic_validate as semantic_module
-from src.problem.nodes.semantic_validate import LogicVerdict
 from src.problem.state import (
     GraphState,
     ProblemExample,
@@ -66,6 +65,18 @@ async def test_중복이면_폐기로_끝난다():
     state = await run({"check_duplicate": always_duplicate})
 
     assert state.discard_reason == DiscardReason.DUPLICATE
+    assert state.reference_code is None
+
+
+@pytest.mark.asyncio
+async def test_모순이면_검증용_코드_생성_없이_폐기된다():
+    async def always_contradiction(state: GraphState) -> dict:
+        return discard(DiscardReason.PROBLEM_CONTRADICTION, "지문 모순")
+
+    state = await run({"check_contradiction": always_contradiction})
+
+    assert state.discard_reason == DiscardReason.PROBLEM_CONTRADICTION
+    assert state.discard_stage == "check_contradiction"
     assert state.reference_code is None
 
 
@@ -202,19 +213,15 @@ async def test_이스케이프된_줄바꿈_예시도_의미검증을_통과한�
     async def escaped_problem(state: GraphState) -> dict:
         result = await fake_nodes.generate_problem(state)
         result["problem_examples"] = [
-            ProblemExample(input="5 6\\n1 2 3 4 5", output="2")
+            ProblemExample(input="5 6\\n1 2 3 4 5", description="계산 과정", output="2")
         ]
         return result
-
-    async def no_contradiction(prompt, cfg, schema):
-        return LogicVerdict(contradiction="none", reason="")
 
     async def judge0_like(code, language, stdin, limit):
         if "\\n" in stdin:
             return RunResult(status=ExecutionStatus.RUNTIME_ERROR, stderr="ValueError")
         return RunResult(status=ExecutionStatus.SUCCEEDED, stdout="2")
 
-    monkeypatch.setattr(semantic_module, "call_llm_structured", no_contradiction)
     monkeypatch.setattr(semantic_module, "run_code", judge0_like)
 
     graph = build_graph(
