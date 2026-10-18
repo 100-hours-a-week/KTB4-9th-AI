@@ -1,0 +1,74 @@
+"""AWS SSM Parameter Store 연동 모듈.
+
+승인된 운영 모델 식별자(/cosmos/prod/model_version)를 조회하며,
+배치 실행 중 빈번한 AWS API 호출을 방지하기 위해 5분 단위 메모리 TTL 캐시를 적용한다.
+"""
+
+import logging
+import time
+
+from src.core.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["get_active_model_version", "clear_ssm_cache"]
+
+# 인메모리 TTL 캐시 (5분)
+_CACHE_TTL_SECONDS = 300.0
+_cached_model_version: str | None = None
+_cached_at: float = 0.0
+
+
+def clear_ssm_cache() -> None:
+    """메모리 캐시를 초기화한다 (테스트 및 즉시 갱신용)."""
+    global _cached_model_version, _cached_at
+    _cached_model_version = None
+    _cached_at = 0.0
+
+
+def get_active_model_version(force_refresh: bool = False) -> str | None:
+    """
+    AWS SSM Parameter Store에서 운영 승인된 모델 버전을 조회한다.
+
+    Parameters:
+        force_refresh (bool): True이면 캐시를 무시하고 SSM을 직접 조회한다.
+
+    Returns:
+        str | None: 승인된 모델 식별자 (예: 'Qwen/Qwen3.5-122B-A10B-FP8').
+                    조회 실패 또는 미설정 시 None 반환.
+    """
+    global _cached_model_version, _cached_at
+
+    now = time.time()
+    if not force_refresh and _cached_model_version and (now - _cached_at < _CACHE_TTL_SECONDS):
+        return _cached_model_version
+
+    settings = get_settings()
+    param_name = settings.ssm_model_version_param
+
+    try:
+        import boto3
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        ssm_client = boto3.client("ssm", region_name=settings.aws_region)
+        response = ssm_client.get_parameter(Name=param_name, WithDecryption=False)
+        val = response.get("Parameter", {}).get("Value")
+        if val:
+            _cached_model_version = val.strip()
+            _cached_at = now
+            logger.info("AWS SSM Parameter Store에서 운영 모델 버전 조회 성공: %s", _cached_model_version)
+            return _cached_model_version
+    except (BotoCoreError, ClientError) as error:
+        logger.warning(
+            "AWS SSM Parameter Store 조회 실패 (파라미터: %s): %s. 기본 설정을 사용합니다.",
+            param_name,
+            error,
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.warning(
+            "AWS SSM 클라이언트 초기화 실패 (파라미터: %s): %s",
+            param_name,
+            error,
+        )
+
+    return None

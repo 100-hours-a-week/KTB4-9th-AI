@@ -14,6 +14,7 @@ from src.client.llm import (
     strip_code_fence,
     use_local_model,
 )
+from src.core.enums import Trigger
 from src.core.exception import LLMOutputParseError
 
 
@@ -220,3 +221,113 @@ def test_vLLM_주소가_없으면_클라이언트를_만들지_않는다(monkeyp
             module.get_local_client()
     finally:
         module.get_local_client.cache_clear()
+
+
+# ── 배치 추론(Modal) 분기 및 비상 폴백 경로 ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_배치_출제노드이고_vLLM이_있으면_Modal로_보낸다(monkeypatch):
+    forbid_gemini(monkeypatch)
+    settings = SimpleNamespace(
+        vllm_url="https://cosmos-vllm.modal.run",
+        vllm_api_key="test-key",
+        modal_request_timeout=60.0,
+        modal_max_retries=3,
+        batch_fallback_to_gemini=True,
+    )
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module, "get_active_model_version", lambda: "Qwen/Qwen3.5-122B-A10B-FP8")
+    completions = fix_local_client(monkeypatch, '{"score": 95}')
+
+    batch_cfg = LLMConfig(
+        model_name="gemini-default",
+        trigger=Trigger.BATCH,
+        node_name="generate_problem",
+    )
+    result = await call_llm_structured("prompt", batch_cfg, Score)
+
+    assert result == Score(score=95)
+    request = completions.requests[0]
+    assert request["model"] == "Qwen/Qwen3.5-122B-A10B-FP8"
+    assert request["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+@pytest.mark.asyncio
+async def test_온디맨드_출제노드는_vLLM이_있어도_Gemini로_보낸다(monkeypatch):
+    settings = SimpleNamespace(
+        vllm_url="https://cosmos-vllm.modal.run",
+        vllm_api_key="test-key",
+    )
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    fix_chat_model(monkeypatch, FakeRunnable(result=Score(score=88)))
+
+    ondemand_cfg = LLMConfig(
+        model_name="gemini-flash",
+        trigger=Trigger.ON_DEMAND,
+        node_name="generate_problem",
+    )
+    result = await call_llm_structured("prompt", ondemand_cfg, Score)
+
+    assert result == Score(score=88)
+
+
+@pytest.mark.asyncio
+async def test_배치여도_출제노드가_아니면_Gemini로_보낸다(monkeypatch):
+    settings = SimpleNamespace(
+        vllm_url="https://cosmos-vllm.modal.run",
+        vllm_api_key="test-key",
+    )
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    fix_chat_model(monkeypatch, FakeRunnable(result=Score(score=77)))
+
+    other_node_cfg = LLMConfig(
+        model_name="gemini-flash",
+        trigger=Trigger.BATCH,
+        node_name="check_contradiction",
+    )
+    result = await call_llm_structured("prompt", other_node_cfg, Score)
+
+    assert result == Score(score=77)
+
+
+@pytest.mark.asyncio
+async def test_Modal_호출_3회_실패_시_Gemini로_비상_폴백한다(monkeypatch):
+    settings = SimpleNamespace(
+        vllm_url="https://cosmos-vllm.modal.run",
+        vllm_api_key="test-key",
+        modal_request_timeout=1.0,
+        modal_max_retries=3,
+        batch_fallback_to_gemini=True,
+    )
+    monkeypatch.setattr(module, "get_settings", lambda: settings)
+    monkeypatch.setattr(module, "get_active_model_version", lambda: "Qwen/Qwen3.5-122B-A10B-FP8")
+
+    # asyncio.sleep을 mock하여 테스트 지연 방지
+    monkeypatch.setattr(asyncio, "sleep", lambda s: asyncio.sleep(0))
+
+    # Modal client는 계속 에러 발생
+    call_count = 0
+
+    class FailingCompletions:
+        async def create(self, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("Modal connection timeout")
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=FailingCompletions()))
+    monkeypatch.setattr(module, "get_local_client", lambda: client)
+
+    # 비상 폴백 대상 Gemini 모델 세팅
+    fix_chat_model(monkeypatch, FakeRunnable(result=Score(score=99)))
+
+    batch_cfg = LLMConfig(
+        model_name="gemini-fallback",
+        trigger=Trigger.BATCH,
+        node_name="generate_problem",
+    )
+    result = await call_llm_structured("prompt", batch_cfg, Score)
+
+    assert call_count == 3, f"3회 재시도를 거쳐야 함. 실제 호출 횟수: {call_count}"
+    assert result == Score(score=99), "Modal 실패 후 Gemini 결과가 반환되어야 함"
+
