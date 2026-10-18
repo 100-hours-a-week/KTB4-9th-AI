@@ -2,9 +2,9 @@ name: AI CI
 
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [develop]
   push:
-    branches: [main]
+    branches: [develop]
 
 permissions:
   contents: read
@@ -48,7 +48,7 @@ jobs:
   build-and-push:
     name: Build and Push Docker Image
     needs: test-and-validate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
