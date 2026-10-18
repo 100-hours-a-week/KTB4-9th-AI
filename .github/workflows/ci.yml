@@ -2,9 +2,9 @@ name: AI CI
 
 on:
   pull_request:
-    branches: [develop, main]
+    branches: [develop]
   push:
-    branches: [main]
+    branches: [develop]
 
 permissions:
   contents: read
@@ -43,19 +43,41 @@ jobs:
           assert response.json() == {'status': 'ok'}
           PY
       - name: Verify Docker image builds
-        run: docker build -f dockerfile -t ai-test:${{ github.sha }} .
+        run: docker build --pull -f dockerfile -t ai-test:${{ github.sha }} .
+
+      - name: Export deployment image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        run: |
+          docker save \
+            --output "${RUNNER_TEMP}/ai-image.tar" \
+            "ai-test:${{ github.sha }}"
+
+      - name: Upload deployment image artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-image-${{ github.sha }}
+          path: ${{ runner.temp }}/ai-image.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
   build-and-push:
     name: Build and Push Docker Image
     needs: test-and-validate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       IMAGE_REPOSITORY: ${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.DOCKERHUB_REPOSITORY }}
       IMAGE_TAG: ${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Download validated image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ai-image-${{ github.sha }}
+          path: ${{ runner.temp }}/ai-image
+
       - name: Validate Docker Hub settings
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -71,7 +93,10 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push image
+
+      - name: Load and push validated image
         run: |
-          docker build --pull -f dockerfile -t "${IMAGE_REPOSITORY}:${IMAGE_TAG}" .
+          docker load --input "${RUNNER_TEMP}/ai-image/ai-image.tar"
+          docker image inspect "ai-test:${IMAGE_TAG}" >/dev/null
+          docker tag "ai-test:${IMAGE_TAG}" "${IMAGE_REPOSITORY}:${IMAGE_TAG}"
           docker push "${IMAGE_REPOSITORY}:${IMAGE_TAG}"
