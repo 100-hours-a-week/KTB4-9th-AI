@@ -10,6 +10,7 @@ from src.client.llm import (
     LLMConfig,
     LocalModel,
     call_llm_structured,
+    called_config,
     current_local_model,
     strip_code_fence,
     use_local_model,
@@ -61,6 +62,21 @@ def test_코드펜스가_없으면_그대로_둔다():
 
 def test_인라인_백틱으로_감싼_코드를_벗긴다():
     assert strip_code_fence("`print(1)`") == "print(1)"
+
+
+def test_gemini_모델이면_temperature를_버린다():
+    cfg = LLMConfig(model_name="gemini-3.5-flash-lite", temperature=0.3)
+    assert cfg.temperature is None
+
+
+def test_gemini_모델이_아니면_temperature를_유지한다():
+    cfg = LLMConfig(model_name="gpt-6.1-sol", temperature=0.3)
+    assert cfg.temperature == 0.3
+
+
+def test_모델명이_없으면_temperature를_유지한다():
+    cfg = LLMConfig(model_name=None, temperature=0.3)
+    assert cfg.temperature == 0.3
 
 
 @pytest.mark.asyncio
@@ -172,6 +188,32 @@ async def test_블록을_벗어나면_다시_Gemini로_보낸다(monkeypatch):
 
     assert current_local_model() is None
     assert result == Score(score=90), "블록 밖인데 로컬 모델로 갔다"
+
+
+CALLED_CFG = LLMConfig(
+    model_name="gemini-test", prompt_version="node/v1", temperature=0.9, top_k=2
+)
+
+
+def test_블록_밖이면_넘긴_설정을_그대로_기록한다():
+    assert called_config(CALLED_CFG) is CALLED_CFG
+
+
+def test_블록_안이면_로컬_모델의_이름과_temperature로_바꾼다():
+    with use_local_model(LOCAL):
+        recorded = called_config(CALLED_CFG)
+
+    assert recorded == LLMConfig(
+        model_name="qwen3-4b-ft", prompt_version="node/v1", temperature=0.7, top_k=2
+    )
+    assert CALLED_CFG.model_name == "gemini-test", "원본 설정이 바뀌었다"
+
+
+def test_로컬_모델의_temperature가_비어_있으면_비워서_기록한다():
+    with use_local_model(LocalModel(model_name="base")):
+        recorded = called_config(CALLED_CFG)
+
+    assert recorded.temperature is None, "Gemini 설정의 temperature가 새어 나왔다"
 
 
 @pytest.mark.asyncio

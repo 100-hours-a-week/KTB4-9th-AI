@@ -3,11 +3,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, model_validator
 
 from src.core.config import get_settings
 from src.core.exception import LLMOutputParseError
@@ -21,6 +21,7 @@ __all__ = [
     "build_chat_model",
     "call_llm_structured",
     "current_local_model",
+    "called_config",
     "strip_code_fence",
     "use_local_model",
     "LLMConfig",
@@ -34,6 +35,13 @@ class LLMConfig(BaseModel):
     prompt_version: str | None = None
     temperature: float | None = None
     top_k: int | None = 3
+
+    @model_validator(mode="after")
+    def drop_ignored_temperature(self) -> Self:
+        # 운영에서 쓰는 gemini 모델(3.5-flash-lite, 3.8-flash)은 temperature를 무시함
+        if self.model_name and is_gemini_model(self.model_name):
+            self.temperature = None
+        return self
 
 
 class LocalModel(BaseModel):
@@ -50,6 +58,18 @@ class LocalModel(BaseModel):
 
 # 설정돼 있으면 이 컨텍스트 안의 call_llm_structured가 Gemini 대신 이 모델을 부른다
 _local_model: ContextVar[LocalModel | None] = ContextVar("local_model", default=None)
+
+
+def is_gemini_model(model_name: str) -> bool:
+    """gemini 모델인지 확인한다.
+
+    Parameters:
+        model_name (str): 모델 이름
+
+    Returns:
+        bool: gemini 모델이면 True
+    """
+    return model_name.lower().startswith("gemini-")
 
 
 @contextmanager
@@ -73,6 +93,29 @@ def use_local_model(model: LocalModel) -> Iterator[None]:
 def current_local_model() -> LocalModel | None:
     """지금 컨텍스트에서 쓰는 로컬 모델. 없으면 None (Gemini)."""
     return _local_model.get()
+
+
+def called_config(cfg: LLMConfig) -> LLMConfig:
+    """
+    실제로 호출한 모델 기준의 설정. node_models에 기록할 때 쓴다.
+
+    use_local_model 블록 안이면 call_llm_structured가 cfg 대신 로컬 모델을
+    부르므로, 모델명과 temperature를 그 로컬 모델 값으로 바꾼다.
+    LLM을 호출한 것과 같은 블록 안에서 불러야 한다.
+
+    Parameters:
+        cfg (LLMConfig): 노드가 call_llm_structured에 넘긴 설정
+
+    Returns:
+        LLMConfig: 블록 밖이면 cfg 그대로, 안이면 로컬 모델 값으로 바꾼 사본
+    """
+    local = _local_model.get()
+    if local is None:
+        return cfg
+    # temperature가 None이어도 덮어써야 cfg의 값이 기록에 남지 않는다
+    return cfg.model_copy(
+        update={"model_name": local.model_name, "temperature": local.temperature}
+    )
 
 
 def strip_code_fence(text: str) -> str:

@@ -78,7 +78,7 @@ async def test_생성_결과를_그래프에_다시_넣을_수_있는_JSON으로
     assert row.output["problem_examples"] == [
         {"input": "5 6\n1 2 3 4 5", "description": "계산 과정", "output": "2"}
     ]
-    assert "node_models" not in row.output, "Gemini 이름이 남으면 헷갈린다"
+    assert "node_models" not in row.output, "모델은 row.model에만 남긴다"
     GraphState(
         **{**row.output, "requested_difficulty": "LV2", "requested_category": "DP"}
     )

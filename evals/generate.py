@@ -142,7 +142,6 @@ async def generate_one(
             else:
                 with use_local_model(local):
                     result = await generate_problem(state)
-            # node_models에는 노드에 적힌 Gemini 이름이 남는다. 모델은 row.model로
             output = to_jsonable_python(
                 {key: value for key, value in result.items() if key != "node_models"}
             )
