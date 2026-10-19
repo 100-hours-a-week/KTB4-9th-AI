@@ -1,7 +1,10 @@
 import pytest
 
+from src.client import llm
 from src.client.judge0 import RunResult
-from src.core.enums import Category, DiscardReason, ExecutionStatus
+from src.client.llm import current_local_model
+from src.core.config import get_settings
+from src.core.enums import Category, DiscardReason, ExecutionStatus, Trigger
 from src.problem.battle import nodes as module
 from src.problem.battle.nodes import (
     GeneratedBattleProblem,
@@ -47,18 +50,33 @@ def fix_structured_response(
     monkeypatch: pytest.MonkeyPatch,
     result: GeneratedBattleProblem | None = None,
     error: Exception | None = None,
-) -> list[str]:
-    """구조화 호출 대신 정해진 결과를 돌려주도록 바꿔 끼운다."""
-    prompts: list[str] = []
+) -> list:
+    """구조화 호출 대신 정해진 결과를 돌려주도록 바꿔 끼운다.
+
+    재시도·폴백 헬퍼는 진짜로 돌게 두고, 그 아래의 call_llm_structured만 바꾼다.
+
+    Returns:
+        list: 호출될 때마다 그 순간의 로컬 모델(없으면 None)이 담긴다
+    """
+    seen: list = []
 
     async def fake(prompt: str, cfg, schema):
-        prompts.append(prompt)
+        seen.append(current_local_model())
         if error:
             raise error
         return result
 
-    monkeypatch.setattr(module, "call_llm_structured", fake)
-    return prompts
+    monkeypatch.setattr(llm, "call_llm_structured", fake)
+    return seen
+
+
+def set_batch_model(monkeypatch: pytest.MonkeyPatch, model: str | None) -> None:
+    """배치가 부를 vLLM 모델 이름을 테스트 값으로 바꾼다. 폴백은 끈다."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "batch_local_model", model)
+    monkeypatch.setattr(settings, "batch_local_thinking", None)
+    monkeypatch.setattr(settings, "batch_local_fallback", False)
+    monkeypatch.setattr(llm, "LOCAL_RETRY_DELAYS_S", (0, 0))
 
 
 def fix_run_code(monkeypatch: pytest.MonkeyPatch, results: list[RunResult]) -> None:
@@ -110,6 +128,48 @@ async def test_생성에_실패하면_폐기한다(monkeypatch):
     result = await generate_battle_problem(BattleState())
 
     assert result["is_discarded"] is True
+    assert result["discard_reason"] == DiscardReason.LLM_ERROR
+
+
+@pytest.mark.asyncio
+async def test_배치면_vLLM으로_만들고_그_모델을_기록한다(monkeypatch):
+    set_batch_model(monkeypatch, "qwen-batch")
+    seen = fix_structured_response(monkeypatch, result=make_problem())
+
+    result = await generate_battle_problem(BattleState(trigger=Trigger.BATCH))
+
+    assert [m.model_name for m in seen] == ["qwen-batch"], (
+        "배치인데 vLLM으로 가지 않았다"
+    )
+    recorded = result["node_models"]["generate_battle_problem"]
+    assert recorded.model_name == "qwen-batch"
+    assert recorded.temperature is None, "Gemini의 temperature가 기록에 남았다"
+
+
+@pytest.mark.asyncio
+async def test_온디맨드면_배치_모델이_있어도_Gemini로_만든다(monkeypatch):
+    set_batch_model(monkeypatch, "qwen-batch")
+    seen = fix_structured_response(monkeypatch, result=make_problem())
+
+    result = await generate_battle_problem(BattleState(trigger=Trigger.ON_DEMAND))
+
+    assert seen == [None], "온디맨드가 vLLM으로 갔다"
+    recorded = result["node_models"]["generate_battle_problem"]
+    assert recorded.model_name == get_settings().llm_models.generate_battle_problem
+
+
+@pytest.mark.asyncio
+async def test_배치에서_로컬_모델이_형식을_못_맞추면_폐기한다(monkeypatch):
+    from src.core.exception import LLMOutputParseError
+
+    set_batch_model(monkeypatch, "qwen-batch")
+    seen = fix_structured_response(
+        monkeypatch, error=LLMOutputParseError("형식 불일치")
+    )
+
+    result = await generate_battle_problem(BattleState(trigger=Trigger.BATCH))
+
+    assert len(seen) == 3, "형식 오류를 재시도하지 않았다"
     assert result["discard_reason"] == DiscardReason.LLM_ERROR
 
 

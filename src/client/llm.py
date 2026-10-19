@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -5,6 +7,7 @@ from contextvars import ContextVar
 from functools import lru_cache
 from typing import TYPE_CHECKING, Self
 
+import openai
 from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, ValidationError, model_validator
@@ -15,7 +18,18 @@ from src.core.exception import LLMOutputParseError
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
+logger = logging.getLogger(__name__)
+
 FENCE_PATTERN = re.compile(r"^```[a-zA-Z]*\n(.*?)\n?```$", re.DOTALL)
+
+LOCAL_RETRY_DELAYS_S = (2, 4)  # 첫 시도까지 합쳐 총 3번
+
+RETRYABLE_LOCAL_ERRORS = (
+    openai.APIConnectionError,  # 타임아웃 포함. Modal 콜드스타트나 네트워크 문제
+    openai.InternalServerError,  # 5xx. 서버 일시 장애
+    openai.RateLimitError,  # 429. 잠깐 몰림
+    LLMOutputParseError,  # 응답 형식 오류. 샘플링이라 다시 부르면 될 수 있음
+)
 
 __all__ = [
     "build_chat_model",
@@ -26,6 +40,9 @@ __all__ = [
     "use_local_model",
     "LLMConfig",
     "LocalModel",
+    "batch_local_model",
+    "batch_model_name",
+    "call_llm_with_fallback",
 ]
 
 
@@ -35,6 +52,7 @@ class LLMConfig(BaseModel):
     prompt_version: str | None = None
     temperature: float | None = None
     top_k: int | None = 3
+    chat_template_kwargs: dict | None = None
 
     @model_validator(mode="after")
     def drop_ignored_temperature(self) -> Self:
@@ -45,7 +63,7 @@ class LLMConfig(BaseModel):
 
 
 class LocalModel(BaseModel):
-    """vLLM 같은 OpenAI 호환 서버에 띄운 모델. 평가에서만 쓴다.
+    """vLLM 같은 OpenAI 호환 서버에 띄운 모델. 평가와 새벽 배치 생성에서 쓴다.
 
     샘플링 값을 비워 두면 서버가 모델의 generation_config 기본값을 쓴다.
     """
@@ -58,6 +76,41 @@ class LocalModel(BaseModel):
 
 # 설정돼 있으면 이 컨텍스트 안의 call_llm_structured가 Gemini 대신 이 모델을 부른다
 _local_model: ContextVar[LocalModel | None] = ContextVar("local_model", default=None)
+
+
+def batch_model_name() -> str | None:
+    """
+    배치 생성 노드가 부를 vLLM 모델 이름.
+
+    지금은 환경 변수에서 읽는다. SSM 모듈이 들어오면 이 함수 안쪽만 바꾼다.
+
+    Returns:
+        str | None: 서버에 요청할 모델 이름. 비어 있으면 None (배치도 Gemini)
+    """
+    return get_settings().batch_local_model or None
+
+
+def batch_local_model() -> LocalModel | None:
+    """
+    배치 생성 노드가 쓸 로컬 모델. 샘플링은 평가 때처럼 서버 기본값을 쓴다.
+
+    Returns:
+        LocalModel | None: 모델 이름이 없으면 None (배치도 Gemini)
+    """
+    model_name = batch_model_name()
+    if model_name is None:
+        return None
+
+    settings = get_settings()
+    thinking = settings.batch_local_thinking
+    return LocalModel(
+        model_name=model_name,
+        timeout_s=settings.batch_local_timeout_s,
+        # None이면 보내지 않아 모델 기본값을 쓴다. False도 명시적으로 보내야 꺼진다
+        chat_template_kwargs=None
+        if thinking is None
+        else {"enable_thinking": thinking},
+    )
 
 
 def is_gemini_model(model_name: str) -> bool:
@@ -77,8 +130,8 @@ def use_local_model(model: LocalModel) -> Iterator[None]:
     """
     블록 안의 LLM 호출을 로컬 모델 서버로 보낸다.
 
-    평가에서 노드 하나만 바꿔 끼울 때 그 노드 실행을 이 블록으로 감싼다.
-    ContextVar라 동시에 도는 다른 요청(다른 task)에는 영향이 없다.
+    평가에서 노드 하나만 바꿔 끼울 때, 또는 call_llm_with_fallback이 로컬 모델을
+    시도할 때 그 호출을 이 블록으로 감싼다.
 
     Parameters:
         model (LocalModel): 요청을 받을 모델
@@ -112,9 +165,14 @@ def called_config(cfg: LLMConfig) -> LLMConfig:
     local = _local_model.get()
     if local is None:
         return cfg
-    # temperature가 None이어도 덮어써야 cfg의 값이 기록에 남지 않는다
+    # temperature랑 chat_template_kwargs가 None이어도
+    # 덮어써야 cfg의 값이 기록에 남지 않는다
     return cfg.model_copy(
-        update={"model_name": local.model_name, "temperature": local.temperature}
+        update={
+            "model_name": local.model_name,
+            "temperature": local.temperature,
+            "chat_template_kwargs": local.chat_template_kwargs,
+        }
     )
 
 
@@ -207,7 +265,7 @@ def get_local_client() -> AsyncOpenAI:
     로컬 모델 서버(vLLM)의 OpenAI 호환 클라이언트.
 
     LangSmith 추적이 켜져 있으면 호출이 그래프 트레이스 아래에 기록된다.
-    평가에서만 쓰므로 import를 여기서 해 운영 경로의 import에 영향을 주지 않는다.
+    재시도는 call_llm_with_fallback이 하므로 SDK 자체 재시도는 끈다.
 
     Raises:
         RuntimeError: VLLM_URL 또는 VLLM_API_KEY가 설정되지 않은 경우
@@ -222,6 +280,7 @@ def get_local_client() -> AsyncOpenAI:
     client = AsyncOpenAI(
         base_url=f"{settings.vllm_url.rstrip('/')}/v1",
         api_key=settings.vllm_api_key,
+        max_retries=0,
     )
     return wrap_openai(client)
 
@@ -276,3 +335,61 @@ async def call_local_structured[T: BaseModel](
         raise LLMOutputParseError(
             f"구조화 응답 해석 실패 (finish_reason={choice.finish_reason}): {error}"
         ) from error
+
+
+async def call_llm_with_fallback[T: BaseModel](
+    prompt: str, cfg: LLMConfig, schema: type[T], local: LocalModel | None
+) -> tuple[T, LLMConfig]:
+    """
+    로컬 모델(vLLM)로 시도하고, 안 되면 Gemini로 한 번 더 부른다.
+
+    일시 오류(RETRYABLE_LOCAL_ERRORS)는 LOCAL_RETRY_DELAYS_S 간격으로 다시
+    시도한다. 다시 불러도 같은 오류(모델 이름·인증·설정 누락)는 바로 폴백한다.
+
+    Parameters:
+        prompt (str): 완성된 프롬프트
+        cfg (LLMConfig): Gemini 설정. 폴백할 때 이 설정으로 부른다
+        schema (type[T]): 응답 형식을 정의한 Pydantic 클래스
+        local (LocalModel | None): 시도할 로컬 모델. None이면 Gemini만 부른다
+
+    Returns:
+        tuple[T, LLMConfig]: 응답과 실제로 호출한 모델의 설정 (node_models 기록용)
+
+    Raises:
+        Exception: 폴백이 꺼져 있으면 로컬 모델의 마지막 오류
+    """
+
+    if local is None:
+        return await call_llm_structured(prompt, cfg, schema), called_config(cfg)
+
+    for attempt, delay in enumerate((*LOCAL_RETRY_DELAYS_S, None), start=1):
+        try:
+            with use_local_model(local):
+                result = await call_llm_structured(prompt, cfg, schema)
+                return result, called_config(cfg)
+        except RETRYABLE_LOCAL_ERRORS as error:
+            last_error = error
+            if delay is None:
+                break
+            logger.warning(
+                "로컬 모델 호출 실패 (%s, %d번째), %d초 뒤 재시도: %r",
+                schema.__name__,
+                attempt,
+                delay,
+                error,
+            )
+            await asyncio.sleep(delay)
+        except Exception as error:
+            last_error = error
+            break
+
+    if not get_settings().batch_local_fallback:
+        raise last_error
+
+    logger.warning(
+        "로컬 모델 %s 호출 실패 (%s), Gemini로 폴백: %r",
+        local.model_name,
+        schema.__name__,
+        last_error,
+    )
+    return await call_llm_structured(prompt, cfg, schema), cfg
