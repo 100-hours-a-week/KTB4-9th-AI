@@ -12,6 +12,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable
 
 from src.client.backend import get_problem_demands
+from src.client.llm import batch_model_name
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, LockKey, ProblemPurpose, Trigger
 from src.db.lock import try_advisory_lock
@@ -259,6 +260,8 @@ async def run_generate(only: str | None = None) -> None:
     Parameters:
         only (str | None): 이 단계만 돌린다. 수동 실행에서 쓴다. 없으면 전부
     """
+    logger.info("배치 생성 모델: %s", batch_model_name() or "Gemini")
+
     steps = [step for name, step in GENERATE_STEPS.items() if only in (None, name)]
     try:
         async with try_advisory_lock(LockKey.BATCH_GENERATE) as acquired:

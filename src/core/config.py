@@ -46,9 +46,18 @@ class Settings(BaseSettings):
 
     llm_models: LLMModels = LLMModels()
 
-    # 평가용 로컬 모델 서버 (Colab vLLM + ngrok). 운영 경로에서는 쓰지 않는다
+    # 로컬 모델 서버 (vLLM, OpenAI 호환).
+    # 평가와 배치 생성에서 쓴다. URL에 /v1은 붙이지 않는다
     vllm_url: str | None = None
     vllm_api_key: str | None = None
+
+    # 배치 생성 노드가 부를 vLLM 모델 이름. 비어 있으면 배치도 Gemini를 쓴다
+    batch_local_model: str | None = None
+    # 재시도해도 실패하면 Gemini로 다시 만든다
+    batch_local_fallback: bool = True
+    batch_local_timeout_s: float = 180  # 시도 한 번의 상한
+    # True/False면 enable_thinking으로 보낸다. None이면 모델 기본값
+    batch_local_thinking: bool | None = None
 
     backend_url: str = "http://localhost:8080"
 
