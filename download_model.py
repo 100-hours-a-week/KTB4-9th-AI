@@ -43,8 +43,8 @@ download_image = (
 )
 def download_model(model_id: str = DEFAULT_MODEL_ID) -> dict:
     """지정된 Hugging Face 모델을 Modal Volume에 다운로드하고 커밋한다."""
-    from huggingface_hub import snapshot_download
     import humanize
+    from huggingface_hub import snapshot_download
 
     hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
 
@@ -73,11 +73,14 @@ def download_model(model_id: str = DEFAULT_MODEL_ID) -> dict:
     print(f"[Modal Cache] 다운로드 완료 경로: {download_path}")
     print(f"[Modal Cache] 총 용량: {readable_size} ({total_size:,} bytes)")
     print(f"[Modal Cache] 소요 시간: {elapsed_time:.1f}초")
-    print(f"[Modal Cache] Modal Volume 변경 사항 커밋 중...")
+    print("[Modal Cache] Modal Volume 변경 사항 커밋 중...")
     print("=" * 60)
 
     volume.commit()
-    print("[Modal Cache] 볼륨 커밋 완료. modal_serve.py에서 1분 이내로 즉시 마운트 가능합니다.")
+    print(
+        "[Modal Cache] 볼륨 커밋 완료. modal_serve.py에서 1분 이내로 "
+        "즉시 마운트 가능합니다."
+    )
 
     return {
         "model_id": model_id,

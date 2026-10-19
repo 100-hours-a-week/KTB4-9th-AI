@@ -1,7 +1,8 @@
 """Modal 서버리스 vLLM 서빙 스크립트.
 
 OpenAI 호환 엔드포인트(/v1/chat/completions)를 제공하며,
-요청 종료 후 60초 동안 유휴 상태가 유지되면 0대로 자동 축소되어 GPU 과금을 원천 차단합니다.
+요청 종료 후 60초 동안 유휴 상태가 유지되면 0대로 자동 축소되어
+GPU 과금을 원천 차단합니다.
 
 사용법:
     # 1. 개발 및 디버깅용 임시 서빙 (코드가 변경되면 자동 핫 리로드)
@@ -16,7 +17,6 @@ OpenAI 호환 엔드포인트(/v1/chat/completions)를 제공하며,
 
 import os
 import subprocess
-import time
 
 import modal
 
@@ -67,15 +67,14 @@ def get_gpu_config() -> tuple[any, int]:
 SELECTED_GPU, TENSOR_PARALLEL_SIZE = get_gpu_config()
 
 # 최신 vLLM 및 Qwen3.5 지원을 위한 transformers >= 5.0 설치
-vllm_image = (
-    modal.Image.from_registry("nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.11")
-    .pip_install(
-        "vllm>=0.7.0",
-        "transformers>=5.0.0",
-        "huggingface_hub>=0.26.0",
-        "fastapi",
-        "pydantic",
-    )
+vllm_image = modal.Image.from_registry(
+    "nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.11"
+).pip_install(
+    "vllm>=0.7.0",
+    "transformers>=5.0.0",
+    "huggingface_hub>=0.26.0",
+    "fastapi",
+    "pydantic",
 )
 
 
@@ -102,8 +101,12 @@ class ModelServer:
         volume.reload()
 
         model_id = os.environ.get("MODEL_ID", DEFAULT_MODEL_ID)
-        api_key = os.environ.get("VLLM_API_KEY") or os.environ.get("MODAL_API_KEY") or "EMPTY"
-        hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        api_key = (
+            os.environ.get("VLLM_API_KEY") or os.environ.get("MODAL_API_KEY") or "EMPTY"
+        )
+        hf_token = os.environ.get("HF_TOKEN") or os.environ.get(
+            "HUGGING_FACE_HUB_TOKEN"
+        )
 
         if hf_token:
             os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
@@ -111,7 +114,8 @@ class ModelServer:
         print("=" * 60)
         print(f"[vLLM Server] 기동 시작: {model_id}")
         print(f"[vLLM Server] 마운트 볼륨: {VOLUME_NAME} -> {CACHE_DIR}")
-        print(f"[vLLM Server] API 인증: {'설정됨' if api_key != 'EMPTY' else '비활성화(EMPTY)'}")
+        auth_desc = "설정됨" if api_key != "EMPTY" else "비활성화(EMPTY)"
+        print(f"[vLLM Server] API 인증: {auth_desc}")
         print("=" * 60)
 
         cmd = [

@@ -33,7 +33,8 @@ def get_active_model_version(
     AWS SSM Parameter Store에서 운영 승인된 모델 버전을 조회한다.
 
     Parameters:
-        default_model (str | None): SSM 조회 실패 시 반환할 기본 모델명 (예: 'Qwen/Qwen3.5-122B-A10B-FP8').
+        default_model (str | None): SSM 조회 실패 시 반환할 기본 모델명
+            (예: 'Qwen/Qwen3.5-122B-A10B-FP8').
         force_refresh (bool): True이면 캐시를 무시하고 SSM을 직접 조회한다.
 
     Returns:
@@ -42,7 +43,11 @@ def get_active_model_version(
     global _cached_model_version, _cached_at
 
     now = time.time()
-    if not force_refresh and _cached_model_version and (now - _cached_at < _CACHE_TTL_SECONDS):
+    if (
+        not force_refresh
+        and _cached_model_version
+        and (now - _cached_at < _CACHE_TTL_SECONDS)
+    ):
         return _cached_model_version
 
     param_name = os.getenv("SSM_MODEL_VERSION_PARAM", "/cosmos/prod/model_version")
@@ -67,11 +72,15 @@ def get_active_model_version(
         if val:
             _cached_model_version = val.strip()
             _cached_at = now
-            logger.info("AWS SSM Parameter Store에서 운영 모델 버전 조회 성공: %s", _cached_model_version)
+            logger.info(
+                "AWS SSM Parameter Store에서 운영 모델 버전 조회 성공: %s",
+                _cached_model_version,
+            )
             return _cached_model_version
     except (BotoCoreError, ClientError) as error:
         logger.warning(
-            "AWS SSM Parameter Store 조회 실패 (파라미터: %s): %s. 기본 설정을 사용합니다.",
+            "AWS SSM Parameter Store 조회 실패 (파라미터: %s): %s. "
+            "기본 설정을 사용합니다.",
             param_name,
             error,
         )
