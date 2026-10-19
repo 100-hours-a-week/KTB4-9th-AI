@@ -82,12 +82,20 @@ def batch_model_name() -> str | None:
     """
     배치 생성 노드가 부를 vLLM 모델 이름.
 
-    지금은 환경 변수에서 읽는다. SSM 모듈이 들어오면 이 함수 안쪽만 바꾼다.
+    1) 환경 변수(batch_local_model)가 명시되어 있으면 최우선 적용한다.
+    2) 지정되지 않은 경우 AWS SSM Parameter Store(/cosmos/prod/model_version)에서 운영 승인된 모델을 조회한다.
+    3) 둘 다 없으면 None을 반환하여 Gemini로 동작한다.
 
     Returns:
         str | None: 서버에 요청할 모델 이름. 비어 있으면 None (배치도 Gemini)
     """
-    return get_settings().batch_local_model or None
+    settings = get_settings()
+    if settings.batch_local_model:
+        return settings.batch_local_model
+
+    from src.client.ssm import get_active_model_version
+
+    return get_active_model_version()
 
 
 def batch_local_model() -> LocalModel | None:
