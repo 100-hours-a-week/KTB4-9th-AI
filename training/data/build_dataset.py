@@ -1,7 +1,8 @@
 """변환 결과를 학습용 jsonl로 만든다.
 
 user에는 실제 서비스가 쓰는 build_prompt 결과를, assistant에는 정답 JSON을 넣는다.
-few-shot은 같은 조합의 다른 변환본에서 1개를 가져온다. DB 문제는 쓰지 않는다.
+few-shot은 학습용으로 나뉜 같은 조합의 다른 변환본에서 1개를 가져온다.
+검증용 문제는 참고 문제로 쓰지 않는다. DB 문제도 쓰지 않는다.
 
 실행: uv run python -m training.data.build_dataset
 """
@@ -76,9 +77,9 @@ def to_sample(problem: dict, groups: dict[tuple, list[dict]]) -> dict:
     }
 
 
-def split(samples: list[dict], ratio: float) -> tuple[list[dict], list[dict]]:
+def split(items: list[dict], ratio: float) -> tuple[list[dict], list[dict]]:
     """학습용과 검증용으로 나눈다."""
-    shuffled = samples[:]
+    shuffled = items[:]
     random.shuffle(shuffled)
     val_size = max(1, int(len(shuffled) * ratio))
     return shuffled[val_size:], shuffled[:val_size]
@@ -99,9 +100,11 @@ def main() -> None:
     random.seed(SEED)
 
     problems = load_problems()
-    groups = group_by_key(problems)
-    samples = [to_sample(problem, groups) for problem in problems]
-    train, val = split(samples, args.val_ratio)
+    train_problems, val_problems = split(problems, args.val_ratio)
+    groups = group_by_key(train_problems)
+
+    train = [to_sample(problem, groups) for problem in train_problems]
+    val = [to_sample(problem, groups) for problem in val_problems]
 
     write_jsonl(TRAIN_PATH, train)
     write_jsonl(VAL_PATH, val)
