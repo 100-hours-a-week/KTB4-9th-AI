@@ -7,8 +7,10 @@ from src.core.config import get_settings
 from src.core.enums import Category, DiscardReason, ExecutionStatus, Trigger
 from src.problem.battle import nodes as module
 from src.problem.battle.nodes import (
+    ANSWER_GUIDE,
     GeneratedBattleProblem,
     build_prompt,
+    ensure_answer_guide,
     fill_outputs,
     generate_battle_problem,
     static_validate,
@@ -260,3 +262,23 @@ async def test_재시도_한도를_넘으면_폐기한다():
     result = await fill_outputs(make_state(fill_attempt=3, max_fill_attempt=3))
 
     assert result["discard_reason"] == DiscardReason.MAX_ATTEMPT_EXCEEDED
+
+
+def test_안내_문구가_없으면_지문_끝에_붙인다():
+    content = "두 수의 합을 구하시오."
+    result = ensure_answer_guide(content)
+    assert result.endswith(ANSWER_GUIDE)
+    assert content in result
+
+
+def test_안내_문구가_이미_있으면_다시_붙이지_않는다():
+    content = f"두 수의 합을 구하시오.\n\n{ANSWER_GUIDE}"
+    result = ensure_answer_guide(content)
+    assert result.count(ANSWER_GUIDE) == 1
+
+
+def test_프롬프트가_코드_제출_표현을_막고_안내_문구를_요구한다():
+    prompt = build_prompt(Category.BINARY_SEARCH)
+    assert "프로그램을 작성하세요" in prompt
+    assert ANSWER_GUIDE in prompt
+    assert "코드를 제출하지 않는다" in prompt

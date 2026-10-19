@@ -28,7 +28,7 @@ from src.problem.battle.state import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "generate_battle_problem/v1"
+PROMPT_VERSION = "generate_battle_problem/v2"
 
 # 채점 서버(judge0 language_id 71)의 파이썬 버전.
 REFERENCE_RUNTIME = "Python 3.8"
@@ -39,7 +39,13 @@ NEIGHBOR_COUNT = 3
 
 RESPONSE_CATEGORIES = [c for c in Category if c != Category.RANDOM]
 
-GENERATE_PROMPT = """당신은 코딩 테스트 배틀 문제 출제자다.
+# 사용자가 출력값만 적는 형식임을 지문 끝에서 알린다.
+ANSWER_GUIDE = "각 입력에 대한 출력값을 적으시오."
+
+GENERATE_PROMPT = """당신은 배틀 문제 출제자다.
+
+사용자는 코드를 제출하지 않는다. 주어진 입력을 보고 출력값만 적는다.
+따라서 지문은 코드 작성을 요구하지 않는다.
 
 [요청]
 카테고리: {category}
@@ -49,10 +55,14 @@ GENERATE_PROMPT = """당신은 코딩 테스트 배틀 문제 출제자다.
 - problem_title은 {max_title}자 이하로 쓴다.
 - problem_content는 {max_content}자 이하로 쓰고,
   입력과 출력 형식을 지문 안에 함께 설명한다.
+  "프로그램을 작성하세요", "구현하세요", "코드를 작성하세요" 같은
+  코드 제출을 요구하는 표현을 쓰지 않는다.
+  마지막 줄은 반드시 "{guide}"로 끝낸다.
 - test_inputs는 서로 다른 입력 {count}개다. 출력은 적지 않는다.
 - algorithm_core에는 이야기 설정을 빼고, 어떤 자료구조·알고리즘으로
   무엇을 계산하는지 한 문장으로 적는다.
-- reference_code는 이 문제를 푸는 {language} 코드다.
+- reference_code는 정답 출력을 만들기 위한 내부용 코드이며
+  사용자에게 보이지 않는다. 이 문제를 푸는 {language} 코드다.
   표준 입력으로 읽고 표준 출력으로 쓴다. 표준 라이브러리만 사용한다.
   {runtime}에서 실행되므로 이후 버전에서 추가된 문법과 함수는 쓰지 않는다.
   설명과 주석 없이 실행 가능한 소스 코드만 넣는다.
@@ -74,11 +84,30 @@ def build_prompt(category: Category) -> str:
     return GENERATE_PROMPT.format(
         category=category.value,
         max_title=MAX_TITLE_LENGTH,
-        max_content=MAX_CONTENT_LENGTH,
+        max_content=MAX_CONTENT_LENGTH - len(ANSWER_GUIDE) - 2,
+        guide=ANSWER_GUIDE,
         count=TEST_CASE_COUNT,
         language=REFERENCE_LANGUAGE.value,
         runtime=REFERENCE_RUNTIME,
     )
+
+
+def ensure_answer_guide(content: str) -> str:
+    """
+    지문이 출력값 안내로 끝나도록 보장한다.
+
+    프롬프트로 요청하지만 모델이 빠뜨릴 수 있어 코드에서 확인한다.
+
+    Parameters:
+        content (str): 생성된 지문
+
+    Returns:
+        str: 안내 문구로 끝나는 지문
+    """
+    stripped = content.rstrip()
+    if stripped.endswith(ANSWER_GUIDE):
+        return stripped
+    return f"{stripped}\n\n{ANSWER_GUIDE}"
 
 
 async def generate_battle_problem(state: BattleState) -> dict:
@@ -120,7 +149,7 @@ async def generate_battle_problem(state: BattleState) -> dict:
     return {
         "category": category,
         "problem_title": problem.problem_title,
-        "problem_content": problem.problem_content,
+        "problem_content": ensure_answer_guide(problem.problem_content),
         "algorithm_core": problem.algorithm_core,
         "test_cases": [BattleTestCase(input=i) for i in problem.test_inputs],
         "reference_code": problem.reference_code,
