@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument("--track-type", default="base_model", choices=["base_model", "trained_model"])
     parser.add_argument("--model-id", required=True, help="평가 대상 모델 식별자")
     parser.add_argument("--prompt-version", default="generate_problem/v11", help="프롬프트 버전")
-    parser.add_argument("--s3-bucket", default="cosmos-mlops-artifacts", help="S3 버킷 이름")
+    parser.add_argument("--s3-bucket", default="cosmos-v2-stage-mlflow-artifacts-352635536602", help="S3 버킷 이름")
     return parser.parse_args()
 
 
