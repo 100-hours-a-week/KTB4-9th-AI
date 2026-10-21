@@ -28,7 +28,7 @@ from src.problem.battle.state import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "generate_battle_problem/v2"
+PROMPT_VERSION = "generate_battle_problem/v3"
 
 # 채점 서버(judge0 language_id 71)의 파이썬 버전.
 REFERENCE_RUNTIME = "Python 3.8"
@@ -41,6 +41,8 @@ RESPONSE_CATEGORIES = [c for c in Category if c != Category.RANDOM]
 
 # 사용자가 출력값만 적는 형식임을 지문 끝에서 알린다.
 ANSWER_GUIDE = "각 입력에 대한 출력값을 적으시오."
+# 지문 상황 설명에 쓸 이름. 팀원 이름을 쓴다.
+STORY_NAMES = ("존", "레인", "웨이드", "케린", "올리", "비키", "찰리", "알렉스", "케빈")
 
 GENERATE_PROMPT = """당신은 배틀 문제 출제자다.
 
@@ -50,15 +52,29 @@ GENERATE_PROMPT = """당신은 배틀 문제 출제자다.
 [요청]
 카테고리: {category}
 
+[난이도]
+- 손으로 풀 수 있되 한눈에 답이 보이지 않는 문제를 만든다.
+- 생각 단계를 두세 개 겹친다.
+  조건 하나를 만족하는 것들 중에서 다시 무언가를 고르게 한다.
+  하나만 보고 답을 고를 수 있으면 너무 쉽다.
+- 음수, 0, 중복된 값처럼 실수하기 쉬운 값을 섞는다.
+- 답이 없는 경우처럼 예외를 섞고, 그때 무엇을 출력할지 지문에 적는다.
+- 중간 단계를 건너뛰어도 답이 같아지는 입력은 만들지 않는다.
+
 [규칙]
-- 짧은 시간 안에 손으로 풀 수 있는 쉬운 문제를 한국어로 만든다.
+- 문제는 한국어로 만든다.
 - problem_title은 {max_title}자 이하로 쓴다.
 - problem_content는 {max_content}자 이하로 쓰고,
-  입력과 출력 형식을 지문 안에 함께 설명한다.
+  상황 설명, 요구할 것, 입력 형식, 출력 형식을 각각 빈 줄로 나눠 쓴다.
+  한 덩어리로 이어 쓰지 않는다. 사용자가 모바일 화면에서 읽는다.
   "프로그램을 작성하세요", "구현하세요", "코드를 작성하세요" 같은
   코드 제출을 요구하는 표현을 쓰지 않는다.
   마지막 줄은 반드시 "{guide}"로 끝낸다.
+- 상황 설명은 두세 문장으로 쓴다. 배경만 짧게 깔고 요구할 것으로 넘어간다.
+- 사람 이름이 필요하면 {names} 중에서 쓴다. 다른 이름은 만들지 않는다.
 - test_inputs는 서로 다른 입력 {count}개다. 출력은 적지 않는다.
+  한 입력의 원소는 다섯 개 안팎으로 한다.
+  한눈에 보이되 계산은 몇 단계 거치게 만든다.
 - algorithm_core에는 이야기 설정을 빼고, 어떤 자료구조·알고리즘으로
   무엇을 계산하는지 한 문장으로 적는다.
 - reference_code는 정답 출력을 만들기 위한 내부용 코드이며
@@ -86,6 +102,7 @@ def build_prompt(category: Category) -> str:
         max_title=MAX_TITLE_LENGTH,
         max_content=MAX_CONTENT_LENGTH - len(ANSWER_GUIDE) - 2,
         guide=ANSWER_GUIDE,
+        names=", ".join(STORY_NAMES),
         count=TEST_CASE_COUNT,
         language=REFERENCE_LANGUAGE.value,
         runtime=REFERENCE_RUNTIME,

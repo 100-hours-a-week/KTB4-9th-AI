@@ -8,6 +8,7 @@ from src.core.enums import Category, DiscardReason, ExecutionStatus, Trigger
 from src.problem.battle import nodes as module
 from src.problem.battle.nodes import (
     ANSWER_GUIDE,
+    STORY_NAMES,
     GeneratedBattleProblem,
     build_prompt,
     ensure_answer_guide,
@@ -282,3 +283,12 @@ def test_프롬프트가_코드_제출_표현을_막고_안내_문구를_요구�
     assert "프로그램을 작성하세요" in prompt
     assert ANSWER_GUIDE in prompt
     assert "코드를 제출하지 않는다" in prompt
+
+
+def test_프롬프트에_난이도_규칙과_이름_목록이_들어간다():
+    prompt = build_prompt(Category.BINARY_SEARCH)
+
+    assert "생각 단계를 두세 개 겹친다" in prompt
+    assert "다섯 개 안팎" in prompt
+    for name in STORY_NAMES:
+        assert name in prompt
