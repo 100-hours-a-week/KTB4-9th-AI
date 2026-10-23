@@ -131,7 +131,7 @@ async def generate_battle_problem(state: BattleState) -> dict:
     """
     배틀 문제와 테스트 입력, 검증용 코드를 한 번에 생성한다.
 
-    새벽 배치(Trigger.BATCH)면 vLLM 모델로 만들고, 안 되면 Gemini로 폴백한다.
+    배치(Trigger.BATCH)면 vLLM 모델로 만들고, 안 되면 Gemini로 폴백한다.
 
     카테고리는 코드가 무작위로 정한다. 재시도로 다시 들어오면 같은
     카테고리를 유지하고 문제만 새로 만든다.
@@ -149,7 +149,7 @@ async def generate_battle_problem(state: BattleState) -> dict:
     )
     category = state.category or random.choice(RESPONSE_CATEGORIES)
 
-    # 새벽 배치에만 vLLM으로 만든다. 온디맨드는 지금처럼 Gemini
+    # 배치에만 vLLM으로 만든다. 온디맨드는 지금처럼 Gemini
     local = batch_local_model() if state.trigger is Trigger.BATCH else None
 
     try:

@@ -1,6 +1,6 @@
-"""새벽 문제 전송 배치.
+"""문제 전송 배치.
 
-03:00에 돈다. 생성 배치가 버퍼에 쌓아 둔 문제를 Spring으로 보낸다.
+스케줄러의 SEND_HOUR에 돈다. 생성 배치가 버퍼에 쌓아 둔 문제를 Spring으로 보낸다.
 데일리, 배틀을 먼저 보내고, 일반 문제는 청크로 나눠 보낸다.
 
 DB 트랜잭션을 연 채로 HTTP를 보내지 않는다. 일시 장애면 20분 넘게
@@ -173,7 +173,7 @@ async def send_daily() -> None:
     오래된 데일리를 DAILY_COUNT개까지 한 요청으로 보낸다.
 
     데일리는 세트라 나눠 보내지 않는다. 실패하면 통째로 남고,
-    다음 날 생성은 재고가 있어 건너뛰므로 다음 날 3시에 이 세트가 나간다.
+    다음 날 생성은 재고가 있어 건너뛰므로 다음 날 전송에서 이 세트가 나간다.
     """
     chunk = await load_chunk(ProblemPurpose.DAILY, DAILY_COUNT)
     if not chunk:
@@ -215,7 +215,7 @@ async def send_battle() -> None:
     가장 오래된 배틀 문제 하나를 보낸다.
 
     Spring은 하루에 한 문제를 받아 그날의 배틀로 쓴다. 실패하면 남기고,
-    다음 날 생성은 남은 문제가 있어 건너뛰므로 다음 날 3시에 이 문제가 나간다.
+    다음 날 생성은 남은 문제가 있어 건너뛰므로 다음 날 전송에서 이 문제가 나간다.
     """
     loaded = await load_battle()
     if loaded is None:
@@ -281,7 +281,7 @@ SEND_STEPS: dict[str, Step] = {
 
 async def run_send(only: str | None = None) -> None:
     """
-    03:00 전송 배치. 스케줄러가 부른다.
+    전송 배치. 스케줄러가 SEND_HOUR에 부른다.
 
     예외를 올리지 않는다. 스케줄러는 결과를 보지 않으므로 로그로 남긴다.
     한 단계가 실패해도 다음 단계는 보낸다.

@@ -63,7 +63,7 @@ class LLMConfig(BaseModel):
 
 
 class LocalModel(BaseModel):
-    """vLLM 같은 OpenAI 호환 서버에 띄운 모델. 평가와 새벽 배치 생성에서 쓴다.
+    """vLLM 같은 OpenAI 호환 서버에 띄운 모델. 평가와 배치 생성에서 쓴다.
 
     샘플링 값을 비워 두면 서버가 모델의 generation_config 기본값을 쓴다.
     """

@@ -1,8 +1,8 @@
-"""새벽 배치를 손으로 한 번 돌린다. 새벽까지 기다리지 않고 확인할 때 쓴다.
+"""배치를 손으로 한 번 돌린다. 예약 시간까지 기다리지 않고 확인할 때 쓴다.
 
     uv run python -m src.batch plan      # 무엇을 몇 개 만들지만 본다 (생성·전송 없음)
-    uv run python -m src.batch generate  # 01:00 생성 배치
-    uv run python -m src.batch send      # 03:00 전송 배치
+    uv run python -m src.batch generate  # 생성 배치
+    uv run python -m src.batch send      # 전송 배치
 
     uv run python -m src.batch generate --only battle  # 한 단계만 (daily|battle|normal)
 
@@ -56,7 +56,7 @@ STEPS = list(GENERATE_STEPS)
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m src.batch", description="새벽 배치를 한 번 실행한다"
+        prog="python -m src.batch", description="배치를 한 번 실행한다"
     )
     parser.add_argument("job", choices=JOBS)
     parser.add_argument(
