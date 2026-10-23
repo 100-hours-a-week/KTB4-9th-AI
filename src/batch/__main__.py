@@ -16,38 +16,32 @@ from collections.abc import Awaitable, Callable
 
 from src.batch.generate import (
     GENERATE_STEPS,
-    fetch_demands,
-    interleave,
-    load_battle_pending,
-    load_pending,
-    plan_generation,
+    build_plan,
     run_generate,
 )
 from src.batch.send import run_send
-from src.core.enums import ProblemPurpose
 from src.core.logging import setup_logging
 from src.db.session import close_engine
 
 
 async def show_plan() -> None:
     """생성 배치가 지금 돈다면 무엇을 몇 개 만들지 출력한다. 아무것도 쓰지 않는다."""
-    demands = await fetch_demands()
-    pending = await load_pending(ProblemPurpose.NORMAL)
-    daily_pending = sum((await load_pending(ProblemPurpose.DAILY)).values())
-    battle_pending = await load_battle_pending()
-    plan = plan_generation(demands or [], pending)
+    plan = await build_plan()
 
     source = (
-        "받지 못함 (버퍼 재고만 봄)" if demands is None else f"{len(demands)}개 항목"
+        "받지 못함 (버퍼 재고만 봄)"
+        if plan.spring_item_count is None
+        else f"{plan.spring_item_count}개 항목"
     )
     print(f"Spring 재고: {source}")
+
     print(
-        f"버퍼 미전송: 일반 {sum(pending.values())}개, "
-        f"데일리 {daily_pending}개, 배틀 {battle_pending}개"
+        f"버퍼 미전송: 일반 {plan.pending_normal}개, "
+        f"데일리 {plan.pending_daily}개, 배틀 {plan.pending_battle}개"
     )
-    print(f"생성 계획: 조합 {len(plan)}개, 문제 {len(interleave(plan))}개")
-    for (category, difficulty), need in plan.items():
-        print(f"  {category.value}/{difficulty.value}: {need}")
+    print(f"생성 계획: 조합 {len(plan.items)}개, 문제 {plan.total}개")
+    for item in plan.items:
+        print(f"  {item.category.value}/{item.difficulty.value}: {item.count}")
 
 
 JOBS: dict[str, Callable[..., Awaitable[None]]] = {

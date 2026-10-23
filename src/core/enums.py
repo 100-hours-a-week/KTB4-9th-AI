@@ -30,6 +30,14 @@ class LockKey(IntEnum):
     BATCH_SEND = 1002  # 생성과 키가 달라야 생성 중에도 3시 전송이 돈다
 
 
+class BatchStep(StrEnum):
+    """배치 단계. 관리자 API에서 한 단계만 돌릴 때 고른다."""
+
+    DAILY = "daily"
+    BATTLE = "battle"
+    NORMAL = "normal"
+
+
 class Language(StrEnum):
     PYTHON = "PYTHON"
     JAVA = "JAVA"
@@ -134,5 +142,8 @@ class ErrorCode(StrEnum):
 
     PROBLEM_GENERATION_FAILED = "PROBLEM_GENERATION_FAILED"
     EVALUATION_FAILED = "EVALUATION_FAILED"
+
+    UNAUTHORIZED = "UNAUTHORIZED"
+    BATCH_ALREADY_RUNNING = "BATCH_ALREADY_RUNNING"
 
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
