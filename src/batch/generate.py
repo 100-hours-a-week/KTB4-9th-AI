@@ -140,9 +140,16 @@ async def fill_slot(key: ProblemKey, semaphore: asyncio.Semaphore) -> bool:
 
 
 async def fetch_demands(
-    retry_delays: tuple[int, ...] = DEMAND_RETRY_DELAYS_S,
+    retry_delays: tuple[int, ...] | None = None,
 ) -> list[ProblemDemand] | None:
-    """Spring 재고를 받는다. 재시도해도 실패하면 None."""
+    """
+    Spring 재고를 받는다. 재시도해도 실패하면 None.
+
+    retry_delays를 비우면 부를 때의 DEMAND_RETRY_DELAYS_S를 쓴다.
+    기본 인자로 박으면 정의 시점 값에 묶여 테스트가 바꿀 수 없다.
+    """
+    if retry_delays is None:
+        retry_delays = DEMAND_RETRY_DELAYS_S
     for attempt, delay in enumerate((*retry_delays, None), start=1):
         try:
             return await get_problem_demands()
