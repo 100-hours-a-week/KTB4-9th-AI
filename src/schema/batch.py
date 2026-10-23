@@ -3,7 +3,7 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from src.core.enums import Category, Difficulty
-from src.schema.base import CamelBaseModel
+from src.schema.base import BaseResponse, CamelBaseModel
 
 
 class ProblemDemand(CamelBaseModel):
@@ -31,3 +31,24 @@ class ProblemDemandResponse(CamelBaseModel):
 
     message: str | None = None
     data: ProblemDemandData
+
+
+class PlanItem(CamelBaseModel):
+    category: Category
+    difficulty: Difficulty
+    count: int
+
+
+class BatchPlan(CamelBaseModel):
+    """생성 배치가 지금 돈다면 만들 문제. 아무것도 쓰지 않고 계산만 한다."""
+
+    spring_item_count: int | None  # None이면 Spring 재고를 받지 못함
+    pending_normal: int
+    pending_daily: int
+    pending_battle: int
+    items: list[PlanItem]
+    total: int
+
+
+class BatchPlanResponse(BaseResponse, BatchPlan):
+    pass

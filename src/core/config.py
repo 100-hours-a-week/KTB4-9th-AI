@@ -1,7 +1,7 @@
 from functools import lru_cache
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_FILE = ".env"
@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     batch_local_timeout_s: float = 180  # 시도 한 번의 상한
     # True/False면 enable_thinking으로 보낸다. None이면 모델 기본값
     batch_local_thinking: bool | None = None
+
+    # 관리자 API 인증 토큰. 비어 있으면 관리자 API를 전부 거절한다
+    admin_token: SecretStr | None = None
 
     backend_url: str = "http://localhost:8080"
 
