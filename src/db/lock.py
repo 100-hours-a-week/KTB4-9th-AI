@@ -47,6 +47,38 @@ async def try_advisory_lock(key: LockKey) -> AsyncGenerator[bool]:
                 await _release(conn, key)
 
 
+async def is_advisory_locked(key: LockKey) -> bool:
+    """
+    lock을 가진 다른 커넥션이 있는지 확인한다.
+    안내용이고 실제 중복 방지는 try_advisory_lock이 맡는다.
+    lock을 잡아 보는 방식은 그 순간 스케줄러를 막을 수 있어 pg_locks를 읽기만 한다.
+
+    Parameters:
+        key (LockKey): 잠금 키
+
+    Returns:
+        bool: 다른 커넥션이 lock을 잡고 있으면 True
+    """
+    async with engine.connect() as conn:
+        locked = await conn.scalar(
+            text("""SELECT EXISTS (
+                SELECT 1
+                FROM pg_locks
+                WHERE locktype = 'advisory'
+                AND database = (
+                    SELECT oid FROM pg_database WHERE datname = current_database()
+                )
+                AND classid = :classid
+                AND objid = :objid
+                AND objsubid = 1
+                AND granted
+            )
+            """),
+            {"classid": int(key) >> 32, "objid": int(key) & 0xFFFFFFFF},
+        )
+    return locked
+
+
 async def _release(conn: AsyncConnection, key: LockKey) -> None:
     """lock을 푼다. 풀지 못하면 커넥션을 버려 lock이 풀로 새지 않게 한다."""
     try:

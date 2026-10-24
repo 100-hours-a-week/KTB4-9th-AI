@@ -43,3 +43,17 @@ class LLMOutputParseError(CosmosError):
 
 class ProblemSaveError(CosmosError):
     """확정된 문제를 저장할 수 없다."""
+
+
+class UnauthorizedError(CosmosError):
+    """관리자 토큰이 없거나 맞지 않는다."""
+
+    code = ErrorCode.UNAUTHORIZED
+    status = 401
+
+
+class BatchAlreadyRunningError(CosmosError):
+    """같은 배치가 이미 실행 중이다."""
+
+    code = ErrorCode.BATCH_ALREADY_RUNNING
+    status = 409

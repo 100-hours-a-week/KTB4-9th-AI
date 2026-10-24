@@ -6,15 +6,20 @@ from pydantic_core import to_jsonable_python
 from evals.generate import GenerationRow
 from evals.requests import EvalRequest
 from evals.score import (
+    IDENTITY,
+    build_meta,
     build_score_graph,
     generation_sha,
     is_infra_failure,
+    parse_args,
     score_one,
     select_scoring,
 )
+from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, DiscardReason
 from src.core.exception import LLMOutputParseError
 from src.problem.graph import PARALLEL_NODES
+from src.problem.nodes import check_contradiction
 from src.problem.state import GraphState, discard
 from tests import fake_nodes
 from tests.fake_nodes import OFFLINE_NODES
@@ -94,6 +99,7 @@ async def test_의미_검증까지_통과하면_병렬_노드_전에_멈춘다()
     row = await score(generated_output())
 
     assert row.status == "passed", row.error or row.discard_detail
+    assert row.node_calls["check_contradiction"] == 1
     assert row.node_calls["generate_ref_code"] == 1
     assert row.node_calls["semantic_validate"] == 1
     assert not set(PARALLEL_NODES) & set(row.node_calls), "병렬 노드까지 갔다"
@@ -120,6 +126,19 @@ async def test_의미_검증에서_폐기되면_사유를_남긴다():
     assert row.status == "discarded"
     assert row.discard_stage == "semantic_validate"
     assert row.discard_reason == DiscardReason.EXAMPLE_MISMATCH.value
+    assert not is_infra_failure(row), "문제 탓인 폐기다"
+
+
+@pytest.mark.asyncio
+async def test_모순이면_검증용_코드를_만들지_않고_폐기한다():
+    nodes = offline(check_contradiction=fail_with(DiscardReason.PROBLEM_CONTRADICTION))
+
+    row = await score(generated_output(), nodes)
+
+    assert row.status == "discarded"
+    assert row.discard_stage == "check_contradiction"
+    assert row.discard_reason == DiscardReason.PROBLEM_CONTRADICTION.value
+    assert "generate_ref_code" not in row.node_calls
     assert not is_infra_failure(row), "문제 탓인 폐기다"
 
 
@@ -212,3 +231,20 @@ async def test_통과한_문제는_다시_채점하지_않는다():
         )
         == []
     )
+
+
+# ── 채점 조건 ──────────────────────────────────────────────────────────
+
+
+def test_채점_조건에_모순_검사_모델과_프롬프트를_남긴다():
+    meta = build_meta(parse_args(["--label", "test"]), model="qwen3-4b-ft")
+
+    assert meta["contradiction_model"] == get_settings().llm_models.check_contradiction
+    assert meta["contradiction_prompt"] == check_contradiction.PROMPT_VERSION
+
+
+def test_이어_채점_기준이_되는_키는_모두_meta에_있다():
+    """meta에 없는 키는 늘 None으로 비교돼 조건이 바뀌어도 막지 못한다."""
+    meta = build_meta(parse_args(["--label", "test"]), model="qwen3-4b-ft")
+
+    assert set(IDENTITY) <= set(meta)

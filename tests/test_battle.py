@@ -1,11 +1,17 @@
 import pytest
 
+from src.client import llm
 from src.client.judge0 import RunResult
-from src.core.enums import Category, DiscardReason, ExecutionStatus
+from src.client.llm import current_local_model
+from src.core.config import get_settings
+from src.core.enums import Category, DiscardReason, ExecutionStatus, Trigger
 from src.problem.battle import nodes as module
 from src.problem.battle.nodes import (
+    ANSWER_GUIDE,
+    STORY_NAMES,
     GeneratedBattleProblem,
     build_prompt,
+    ensure_answer_guide,
     fill_outputs,
     generate_battle_problem,
     static_validate,
@@ -47,18 +53,33 @@ def fix_structured_response(
     monkeypatch: pytest.MonkeyPatch,
     result: GeneratedBattleProblem | None = None,
     error: Exception | None = None,
-) -> list[str]:
-    """구조화 호출 대신 정해진 결과를 돌려주도록 바꿔 끼운다."""
-    prompts: list[str] = []
+) -> list:
+    """구조화 호출 대신 정해진 결과를 돌려주도록 바꿔 끼운다.
+
+    재시도·폴백 헬퍼는 진짜로 돌게 두고, 그 아래의 call_llm_structured만 바꾼다.
+
+    Returns:
+        list: 호출될 때마다 그 순간의 로컬 모델(없으면 None)이 담긴다
+    """
+    seen: list = []
 
     async def fake(prompt: str, cfg, schema):
-        prompts.append(prompt)
+        seen.append(current_local_model())
         if error:
             raise error
         return result
 
-    monkeypatch.setattr(module, "call_llm_structured", fake)
-    return prompts
+    monkeypatch.setattr(llm, "call_llm_structured", fake)
+    return seen
+
+
+def set_batch_model(monkeypatch: pytest.MonkeyPatch, model: str | None) -> None:
+    """배치가 부를 vLLM 모델 이름을 테스트 값으로 바꾼다. 폴백은 끈다."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "batch_local_model", model)
+    monkeypatch.setattr(settings, "batch_local_thinking", None)
+    monkeypatch.setattr(settings, "batch_local_fallback", False)
+    monkeypatch.setattr(llm, "LOCAL_RETRY_DELAYS_S", (0, 0))
 
 
 def fix_run_code(monkeypatch: pytest.MonkeyPatch, results: list[RunResult]) -> None:
@@ -110,6 +131,48 @@ async def test_생성에_실패하면_폐기한다(monkeypatch):
     result = await generate_battle_problem(BattleState())
 
     assert result["is_discarded"] is True
+    assert result["discard_reason"] == DiscardReason.LLM_ERROR
+
+
+@pytest.mark.asyncio
+async def test_배치면_vLLM으로_만들고_그_모델을_기록한다(monkeypatch):
+    set_batch_model(monkeypatch, "qwen-batch")
+    seen = fix_structured_response(monkeypatch, result=make_problem())
+
+    result = await generate_battle_problem(BattleState(trigger=Trigger.BATCH))
+
+    assert [m.model_name for m in seen] == ["qwen-batch"], (
+        "배치인데 vLLM으로 가지 않았다"
+    )
+    recorded = result["node_models"]["generate_battle_problem"]
+    assert recorded.model_name == "qwen-batch"
+    assert recorded.temperature is None, "Gemini의 temperature가 기록에 남았다"
+
+
+@pytest.mark.asyncio
+async def test_온디맨드면_배치_모델이_있어도_Gemini로_만든다(monkeypatch):
+    set_batch_model(monkeypatch, "qwen-batch")
+    seen = fix_structured_response(monkeypatch, result=make_problem())
+
+    result = await generate_battle_problem(BattleState(trigger=Trigger.ON_DEMAND))
+
+    assert seen == [None], "온디맨드가 vLLM으로 갔다"
+    recorded = result["node_models"]["generate_battle_problem"]
+    assert recorded.model_name == get_settings().llm_models.generate_battle_problem
+
+
+@pytest.mark.asyncio
+async def test_배치에서_로컬_모델이_형식을_못_맞추면_폐기한다(monkeypatch):
+    from src.core.exception import LLMOutputParseError
+
+    set_batch_model(monkeypatch, "qwen-batch")
+    seen = fix_structured_response(
+        monkeypatch, error=LLMOutputParseError("형식 불일치")
+    )
+
+    result = await generate_battle_problem(BattleState(trigger=Trigger.BATCH))
+
+    assert len(seen) == 3, "형식 오류를 재시도하지 않았다"
     assert result["discard_reason"] == DiscardReason.LLM_ERROR
 
 
@@ -200,3 +263,32 @@ async def test_재시도_한도를_넘으면_폐기한다():
     result = await fill_outputs(make_state(fill_attempt=3, max_fill_attempt=3))
 
     assert result["discard_reason"] == DiscardReason.MAX_ATTEMPT_EXCEEDED
+
+
+def test_안내_문구가_없으면_지문_끝에_붙인다():
+    content = "두 수의 합을 구하시오."
+    result = ensure_answer_guide(content)
+    assert result.endswith(ANSWER_GUIDE)
+    assert content in result
+
+
+def test_안내_문구가_이미_있으면_다시_붙이지_않는다():
+    content = f"두 수의 합을 구하시오.\n\n{ANSWER_GUIDE}"
+    result = ensure_answer_guide(content)
+    assert result.count(ANSWER_GUIDE) == 1
+
+
+def test_프롬프트가_코드_제출_표현을_막고_안내_문구를_요구한다():
+    prompt = build_prompt(Category.BINARY_SEARCH)
+    assert "프로그램을 작성하세요" in prompt
+    assert ANSWER_GUIDE in prompt
+    assert "코드를 제출하지 않는다" in prompt
+
+
+def test_프롬프트에_난이도_규칙과_이름_목록이_들어간다():
+    prompt = build_prompt(Category.BINARY_SEARCH)
+
+    assert "생각 단계를 두세 개 겹친다" in prompt
+    assert "다섯 개 안팎" in prompt
+    for name in STORY_NAMES:
+        assert name in prompt

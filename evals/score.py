@@ -6,7 +6,7 @@
 - discard_problem, finalize: DB에 쓰지 않는다
 - 병렬 생성 노드(테스트케이스, 정답 코드, 키워드) 직전에서 멈춘다
 
-그래서 정적 검증 → 레퍼런스 코드 → judge0 실행 → 의미 검증(재시도 포함)까지
+그래서 정적 검증 → 모순 검사 → 레퍼런스 코드 → judge0 실행 → 의미 검증(재시도 포함)까지
 운영과 같은 기준으로 돈다. Colab 서버는 필요 없고 Gemini와 judge0만 쓴다.
 
     uv run python -m evals.score --label qwen3-4b-base
@@ -54,7 +54,7 @@ from evals.requests import EvalRequest, load_requests
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, DiscardReason
 from src.problem.graph import DEFAULT_NODES, PARALLEL_NODES, NodeFn, build_graph
-from src.problem.nodes import generate_ref_code, semantic_validate
+from src.problem.nodes import check_contradiction, generate_ref_code
 from src.problem.state import GraphState
 
 ROWS_FILE = "scores.jsonl"
@@ -64,7 +64,12 @@ META_FILE = "score_meta.json"
 INFRA_DISCARDS = {DiscardReason.LLM_ERROR, DiscardReason.EXECUTOR_ERROR}
 
 # 채점 기준. 이 값이 다르면 같은 label로 이어 채점하지 않는다
-IDENTITY = ("ref_code_model", "ref_code_prompt", "semantic_model", "semantic_prompt")
+IDENTITY = (
+    "ref_code_model",
+    "ref_code_prompt",
+    "contradiction_model",
+    "contradiction_prompt",
+)
 
 
 class ScoreRow(Row):
@@ -308,8 +313,8 @@ def build_meta(args: argparse.Namespace, model: str) -> dict:
         "model": model,
         "ref_code_model": get_settings().llm_models.generate_ref_code,
         "ref_code_prompt": generate_ref_code.PROMPT_VERSION,
-        "semantic_model": get_settings().llm_models.semantic_validate,
-        "semantic_prompt": semantic_validate.PROMPT_VERSION,
+        "contradiction_model": get_settings().llm_models.check_contradiction,
+        "contradiction_prompt": check_contradiction.PROMPT_VERSION,
         "langsmith_project": args.project,
         "created_at": datetime.now(UTC).isoformat(),
     }

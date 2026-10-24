@@ -43,7 +43,9 @@ async def fake_problem(state: GraphState) -> dict:
         "difficulty": state.requested_difficulty,
         "category": state.requested_category,
         "problem_title": "합이 M인 쌍의 개수",
-        "problem_examples": [ProblemExample(input="5 6\n1 2 3 4 5", output="2")],
+        "problem_examples": [
+            ProblemExample(input="5 6\n1 2 3 4 5", description="계산 과정", output="2")
+        ],
         "node_models": {"generate_problem": LLMConfig(model_name="gemini-3.8-flash")},
     }
 
@@ -74,9 +76,9 @@ async def test_생성_결과를_그래프에_다시_넣을_수_있는_JSON으로
     assert row.model == GEMINI
     assert row.output["problem_title"] == "합이 M인 쌍의 개수"
     assert row.output["problem_examples"] == [
-        {"input": "5 6\n1 2 3 4 5", "output": "2", "description": None}
+        {"input": "5 6\n1 2 3 4 5", "description": "계산 과정", "output": "2"}
     ]
-    assert "node_models" not in row.output, "Gemini 이름이 남으면 헷갈린다"
+    assert "node_models" not in row.output, "모델은 row.model에만 남긴다"
     GraphState(
         **{**row.output, "requested_difficulty": "LV2", "requested_category": "DP"}
     )

@@ -124,7 +124,7 @@ def test_normalize_removes_duplicates() -> None:
 
 def test_normalize_drops_inputs_already_shown_as_examples() -> None:
     """공개 예시와 같은 입력은 비공개 테스트 케이스로서 값이 없다."""
-    examples = [ProblemExample(input="1 2", output="3")]
+    examples = [ProblemExample(input="1 2", description="계산 과정", output="3")]
 
     assert normalize_inputs(["1 2", "3 4"], examples) == ["3 4"]
 

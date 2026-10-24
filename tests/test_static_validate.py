@@ -31,7 +31,9 @@ def make_state(**overrides) -> GraphState:
         "problem_content": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
         "input_format": "첫째 줄에 N과 M, 둘째 줄에 N개의 정수가 주어진다.",
         "output_format": "쌍의 개수를 출력한다.",
-        "problem_examples": [ProblemExample(input="5 6\n1 2 3 4 5", output="2")],
+        "problem_examples": [
+            ProblemExample(input="5 6\n1 2 3 4 5", description="계산 과정", output="2")
+        ],
         "input_constraints": [
             InputConstraint(
                 target="N",
@@ -87,7 +89,9 @@ async def test_난이도가_다르면_폐기한다():
 
 @pytest.mark.asyncio
 async def test_정수_출력에_글자가_오면_폐기한다():
-    examples = [ProblemExample(input="5 6\n1 2 3 4 5", output="YES")]
+    examples = [
+        ProblemExample(input="5 6\n1 2 3 4 5", description="계산 과정", output="YES")
+    ]
     result = await static_validate(make_state(problem_examples=examples))
     assert result["discard_reason"] == DiscardReason.MISMATCH_TYPE
 
@@ -153,3 +157,16 @@ async def test_Spring_컬럼_길이와_같으면_통과한다(field, limit):
     result = await static_validate(make_state(**{field: "가" * limit}))
 
     assert result == {"is_statically_validated": True}
+
+
+@pytest.mark.asyncio
+async def test_예시_input에_등호가_있으면_폐기한다():
+    examples = [
+        ProblemExample(
+            input="budget=10, prices=[5, 2, 3]",
+            description="계산 과정",
+            output="2",
+        )
+    ]
+    result = await static_validate(make_state(problem_examples=examples))
+    assert result["discard_reason"] == DiscardReason.VALIDATION_FAILED

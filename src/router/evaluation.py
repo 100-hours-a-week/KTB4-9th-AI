@@ -12,7 +12,5 @@ async def evaluate_nl_solution(request: EvaluationRequest) -> EvaluationResponse
     return EvaluationResponse(
         score=evaluation.score,
         llm_feedback=evaluation.feedback,
-        keywords=evaluation_service.align_keywords(
-            request.solution_keywords, evaluation.keywords
-        ),
+        keywords=evaluation.keywords,
     )
