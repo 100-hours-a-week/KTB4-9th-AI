@@ -1,8 +1,9 @@
-"""새벽 문제 생성 배치.
+"""문제 생성 배치.
 
-01:00에 돈다. 데일리 5개, 배틀 1개를 만들고, 조합(카테고리, 난이도)마다
-아직 아무도 풀지 않은 문제가 TARGET_STOCK개가 되도록 부족한 만큼 만든다.
-만든 문제는 finalize가 버퍼에 쌓고, 03:00 전송 배치가 Spring으로 보낸다.
+스케줄러의 GENERATE_HOUR에 돈다. 데일리 5개, 배틀 1개를 만들고,
+조합(카테고리, 난이도)마다 아직 아무도 풀지 않은 문제가 TARGET_STOCK개가 되도록
+부족한 만큼 만든다.
+만든 문제는 finalize가 버퍼에 쌓고, 전송 배치가 Spring으로 보낸다.
 """
 
 import asyncio
@@ -139,9 +140,16 @@ async def fill_slot(key: ProblemKey, semaphore: asyncio.Semaphore) -> bool:
 
 
 async def fetch_demands(
-    retry_delays: tuple[int, ...] = DEMAND_RETRY_DELAYS_S,
+    retry_delays: tuple[int, ...] | None = None,
 ) -> list[ProblemDemand] | None:
-    """Spring 재고를 받는다. 재시도해도 실패하면 None."""
+    """
+    Spring 재고를 받는다. 재시도해도 실패하면 None.
+
+    retry_delays를 비우면 부를 때의 DEMAND_RETRY_DELAYS_S를 쓴다.
+    기본 인자로 박으면 정의 시점 값에 묶여 테스트가 바꿀 수 없다.
+    """
+    if retry_delays is None:
+        retry_delays = DEMAND_RETRY_DELAYS_S
     for attempt, delay in enumerate((*retry_delays, None), start=1):
         try:
             return await get_problem_demands()
@@ -254,7 +262,7 @@ GENERATE_STEPS: dict[str, Step] = {
 
 async def run_generate(only: str | None = None) -> None:
     """
-    01:00 생성 배치. 스케줄러가 부른다.
+    생성 배치. 스케줄러가 GENERATE_HOUR에 부른다.
 
     예외를 올리지 않는다. 스케줄러는 결과를 보지 않으므로 로그로 남긴다.
     한 단계가 실패해도 다음 단계는 돈다.

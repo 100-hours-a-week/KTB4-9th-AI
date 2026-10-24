@@ -197,7 +197,7 @@ async def test_node_saves_the_problem_and_returns_its_id(
 async def test_node_saves_trigger_and_purpose_from_state(
     monkeypatch: pytest.MonkeyPatch, trigger: Trigger, purpose: ProblemPurpose
 ) -> None:
-    """이 값이 틀리면 새벽 전송에서 빠지거나 엉뚱한 엔드포인트로 나간다."""
+    """이 값이 틀리면 배치 전송에서 빠지거나 엉뚱한 엔드포인트로 나간다."""
     options: list[dict] = []
 
     @contextlib.asynccontextmanager

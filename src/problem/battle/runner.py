@@ -1,6 +1,6 @@
 """배틀 문제 생성 그래프 1회 실행.
 
-새벽 배치가 쓴다. 실패가 배치의 다른 단계를 막지 않도록
+배치가 쓴다. 실패가 배치의 다른 단계를 막지 않도록
 예외를 올리지 않고 None으로 알린다.
 """
 
@@ -22,7 +22,7 @@ async def run_battle_graph(*, trigger: Trigger) -> BattleProblem | None:
     None을 반환한다.
 
     Parameters:
-        trigger (Trigger): 생성 경로. BATCH로 만든 문제만 새벽에 전송된다
+        trigger (Trigger): 생성 경로. BATCH로 만든 문제만 배치로 전송된다
 
     Returns:
         BattleProblem | None: 생성한 문제. 실패하면 None
