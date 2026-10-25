@@ -140,11 +140,12 @@ class ModelServer:
             "0.0.0.0",
             "--tensor-parallel-size",
             str(TENSOR_PARALLEL_SIZE),
-            # 122B 모델이 140GB H200에 안착할 수 있도록 컨텍스트 길이를 4096으로 조정 (KV 캐시 12GB 절감)
+            # 122B 모델이 140GB H200에 안착할 수 있도록 컨텍스트 길이를 4096으로 조정하고 메모리 점유율을 0.88로 설정
             "--max-model-len",
             "4096",
             "--gpu-memory-utilization",
-            "0.95",
+            "0.88",
+            "--enforce-eager",
             # Qwen3.5 계열 추론 토큰(<think>) 노출을 서버 레벨에서 원천 차단
             "--default-chat-template-kwargs",
             '{"enable_thinking": false}',
