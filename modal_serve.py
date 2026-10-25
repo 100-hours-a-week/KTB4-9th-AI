@@ -90,6 +90,8 @@ vllm_image = (
     # 환경 변수 MODAL_GPU_TYPE으로 동적 선택 (기본값: H200 141GB)
     gpu=SELECTED_GPU,
     volumes={CACHE_DIR: volume},
+    # 단일 GPU 컨테이너로 제한하여 중복 기동 및 비용 과다 방지
+    max_containers=1,
     # 60초 유휴 시 컨테이너를 0대로 자동 축소하여 유휴 비용 방어
     scaledown_window=60,
     timeout=10 * MINUTES,
@@ -106,8 +108,9 @@ class ModelServer:
         # 최신 캐싱된 가중치를 컨테이너 파일시스템에 즉시 동기화
         volume.reload()
 
-        # DeepGEMM NVCC 버전 충돌 방지
+        # DeepGEMM NVCC 버전 충돌 방지 및 메모리 단편화 완화
         os.environ["VLLM_USE_DEEP_GEMM"] = "0"
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
         model_id = os.environ.get("MODEL_ID", DEFAULT_MODEL_ID)
         api_key = (
@@ -137,8 +140,11 @@ class ModelServer:
             "0.0.0.0",
             "--tensor-parallel-size",
             str(TENSOR_PARALLEL_SIZE),
+            # 122B 모델이 140GB H200에 안착할 수 있도록 컨텍스트 길이를 4096으로 조정 (KV 캐시 12GB 절감)
             "--max-model-len",
-            "8192",
+            "4096",
+            "--gpu-memory-utilization",
+            "0.95",
             # Qwen3.5 계열 추론 토큰(<think>) 노출을 서버 레벨에서 원천 차단
             "--default-chat-template-kwargs",
             '{"enable_thinking": false}',
