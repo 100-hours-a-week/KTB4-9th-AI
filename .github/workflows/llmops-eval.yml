@@ -145,6 +145,9 @@ jobs:
     timeout-minutes: 15
     environment: production-approval
 
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -168,8 +171,8 @@ jobs:
           echo "성공적으로 SSM 파라미터가 등록되었습니다. 다음 날 새벽 01:00 배치부터 자동 적용됩니다."
 
       - name: 디스코드 운영 배포 승격 알림 발송
-        if: secrets.DISCORD_WEBHOOK_URL != ''
+        if: env.DISCORD_WEBHOOK_URL != ''
         run: |
           curl -H "Content-Type: application/json" -X POST \
             -d "{\"content\": \"✅ **[LLMOps 운영 모델 승격 승인]**\n- **승인 모델**: \`${{ inputs.model_id }}\`\n- **적용 파라미터**: \`/cosmos/prod/model_version\`\n다음 새벽 01:00 KST 배치부터 이 모델로 자동 추론됩니다.\"}" \
-            "${{ secrets.DISCORD_WEBHOOK_URL }}"
+            "${DISCORD_WEBHOOK_URL}"
