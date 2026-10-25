@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # 비어 있으면 트레이스 수집을 건너뛰고 정상 동작한다.
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
-    langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_host: str = "https://jp.cloud.langfuse.com"
 
     backend_url: str = "http://localhost:8080"
 
