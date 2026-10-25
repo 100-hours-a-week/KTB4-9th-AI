@@ -277,7 +277,7 @@ def get_local_client() -> AsyncOpenAI:
     """
     로컬 모델 서버(vLLM)의 OpenAI 호환 클라이언트.
 
-    LangSmith 추적이 켜져 있으면 호출이 그래프 트레이스 아래에 기록된다.
+    LangSmith 및 Langfuse 추적이 켜져 있으면 호출이 그래프 트레이스 아래에 기록된다.
     재시도는 call_llm_with_fallback이 하므로 SDK 자체 재시도는 끈다.
 
     Raises:
@@ -287,8 +287,8 @@ def get_local_client() -> AsyncOpenAI:
     if not settings.vllm_url or not settings.vllm_api_key:
         raise RuntimeError("VLLM_URL, VLLM_API_KEY가 설정되지 않았습니다.")
 
+    from langfuse.openai import AsyncOpenAI
     from langsmith.wrappers import wrap_openai
-    from openai import AsyncOpenAI
 
     client = AsyncOpenAI(
         base_url=f"{settings.vllm_url.rstrip('/')}/v1",

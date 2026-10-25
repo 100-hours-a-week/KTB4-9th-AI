@@ -50,6 +50,7 @@ from evals.common import (
     select_pending,
 )
 from evals.requests import EvalRequest, load_requests
+from src.client.langfuse import flush_langfuse, langfuse_observation
 from src.client.llm import LocalModel, get_local_client, use_local_model
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty
@@ -123,19 +124,33 @@ async def generate_one(
     output: dict | None = None
     error: str | None = None
 
-    with langsmith.trace(
-        name=f"generate:{label}",
-        run_type="chain",
-        inputs={"request": request.model_dump(mode="json")},
-        tags=[EVAL_TAG, label],
-        metadata={
-            "eval_label": label,
-            "model": model,
-            "request_id": request.id,
-            "difficulty": request.difficulty.value,
-            "category": request.category.value,
-        },
-    ) as run:
+    with (
+        langsmith.trace(
+            name=f"generate:{label}",
+            run_type="chain",
+            inputs={"request": request.model_dump(mode="json")},
+            tags=[EVAL_TAG, label],
+            metadata={
+                "eval_label": label,
+                "model": model,
+                "request_id": request.id,
+                "difficulty": request.difficulty.value,
+                "category": request.category.value,
+            },
+        ) as run,
+        langfuse_observation(
+            name=f"generate:{label}",
+            as_type="chain",
+            input={"request": request.model_dump(mode="json")},
+            metadata={
+                "eval_label": label,
+                "model": model,
+                "request_id": request.id,
+                "difficulty": request.difficulty.value,
+                "category": request.category.value,
+            },
+        ),
+    ):
         try:
             if local is None:
                 result = await generate_problem(state)
@@ -284,6 +299,7 @@ async def main(argv: list[str] | None = None) -> None:
             )
         finally:
             wait_for_all_tracers()  # 끝나기 전에 LangSmith로 못 보낸 트레이스를 보낸다
+            flush_langfuse()  # 끝나기 전에 Langfuse로 못 보낸 트레이스를 플러시한다
 
     rows = [row for row in load_rows(rows_path, GenerationRow).values()]
     counts = Counter(

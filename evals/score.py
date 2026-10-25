@@ -51,6 +51,7 @@ from evals.generate import META_FILE as GENERATE_META_FILE
 from evals.generate import ROWS_FILE as GENERATIONS_FILE
 from evals.generate import GenerationRow
 from evals.requests import EvalRequest, load_requests
+from src.client.langfuse import flush_langfuse, get_langfuse_callback_handler
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, DiscardReason
 from src.problem.graph import DEFAULT_NODES, PARALLEL_NODES, NodeFn, build_graph
@@ -197,6 +198,10 @@ async def score_one(
             "category": request.category.value,
         },
     }
+    langfuse_handler = get_langfuse_callback_handler()
+    if langfuse_handler is not None:
+        config["callbacks"] = [langfuse_handler]
+
     started_at = datetime.now(UTC)
     start = time.perf_counter()
     result: GraphState | None = None
@@ -388,6 +393,7 @@ async def main(argv: list[str] | None = None) -> None:
             )
         finally:
             wait_for_all_tracers()  # 끝나기 전에 LangSmith로 못 보낸 트레이스를 보낸다
+            flush_langfuse()  # 끝나기 전에 Langfuse로 못 보낸 트레이스를 플러시한다
 
     final = load_rows(rows_path, ScoreRow)
     counts = Counter(

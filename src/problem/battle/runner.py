@@ -6,6 +6,7 @@
 
 import logging
 
+from src.client.langfuse import get_langfuse_callback_handler
 from src.core.enums import Trigger
 from src.problem.battle.graph import get_battle_graph
 from src.problem.battle.state import BattleState
@@ -27,9 +28,18 @@ async def run_battle_graph(*, trigger: Trigger) -> BattleProblem | None:
     Returns:
         BattleProblem | None: 생성한 문제. 실패하면 None
     """
+    config: dict = {}
+    handler = get_langfuse_callback_handler()
+    if handler:
+        config["callbacks"] = [handler]
+        config["tags"] = ["battle", f"trigger:{trigger.value}"]
+        config["metadata"] = {"trigger": trigger.value}
+
     try:
         result = BattleState(
-            **await get_battle_graph().ainvoke(BattleState(trigger=trigger))
+            **await get_battle_graph().ainvoke(
+                BattleState(trigger=trigger), config=config or None
+            )
         )
     except Exception as error:
         logger.warning("배틀 문제 생성 실패: %r", error, exc_info=True)

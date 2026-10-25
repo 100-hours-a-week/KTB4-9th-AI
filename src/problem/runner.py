@@ -6,6 +6,7 @@
 
 import logging
 
+from src.client.langfuse import get_langfuse_callback_handler
 from src.core.enums import Category, Difficulty, ProblemPurpose, Trigger
 from src.problem.graph import get_graph
 from src.problem.nodes.finalize import build_problem
@@ -43,8 +44,20 @@ async def run_problem_graph(
         trigger=trigger,
         purpose=purpose,
     )
+    config: dict = {}
+    handler = get_langfuse_callback_handler()
+    if handler:
+        config["callbacks"] = [handler]
+        config["tags"] = [f"trigger:{trigger.value}", f"purpose:{purpose.value}"]
+        config["metadata"] = {
+            "difficulty": difficulty.value,
+            "category": category.value,
+            "trigger": trigger.value,
+            "purpose": purpose.value,
+        }
+
     try:
-        result = GraphState(**await get_graph().ainvoke(state))
+        result = GraphState(**await get_graph().ainvoke(state, config=config or None))
     except Exception as error:
         logger.warning("문제 생성 실패 (%s): %r", label, error, exc_info=True)
         return None
