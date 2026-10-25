@@ -1,8 +1,9 @@
-"""새벽 문제 생성 배치.
+"""문제 생성 배치.
 
-01:00에 돈다. 데일리 5개, 배틀 1개를 만들고, 조합(카테고리, 난이도)마다
-아직 아무도 풀지 않은 문제가 TARGET_STOCK개가 되도록 부족한 만큼 만든다.
-만든 문제는 finalize가 버퍼에 쌓고, 03:00 전송 배치가 Spring으로 보낸다.
+스케줄러의 GENERATE_HOUR에 돈다. 데일리 5개, 배틀 1개를 만들고,
+조합(카테고리, 난이도)마다 아직 아무도 풀지 않은 문제가 TARGET_STOCK개가 되도록
+부족한 만큼 만든다.
+만든 문제는 finalize가 버퍼에 쌓고, 전송 배치가 Spring으로 보낸다.
 """
 
 import asyncio
@@ -21,7 +22,7 @@ from src.db.session import session_scope
 from src.problem.battle.runner import run_battle_graph
 from src.problem.daily import DAILY_COUNT, generate_daily_problems
 from src.problem.runner import run_problem_graph
-from src.schema.batch import ProblemDemand
+from src.schema.batch import BatchPlan, PlanItem, ProblemDemand
 
 logger = logging.getLogger(__name__)
 
@@ -138,9 +139,18 @@ async def fill_slot(key: ProblemKey, semaphore: asyncio.Semaphore) -> bool:
     return False
 
 
-async def fetch_demands() -> list[ProblemDemand] | None:
-    """Spring 재고를 받는다. 재시도해도 실패하면 None."""
-    for attempt, delay in enumerate((*DEMAND_RETRY_DELAYS_S, None), start=1):
+async def fetch_demands(
+    retry_delays: tuple[int, ...] | None = None,
+) -> list[ProblemDemand] | None:
+    """
+    Spring 재고를 받는다. 재시도해도 실패하면 None.
+
+    retry_delays를 비우면 부를 때의 DEMAND_RETRY_DELAYS_S를 쓴다.
+    기본 인자로 박으면 정의 시점 값에 묶여 테스트가 바꿀 수 없다.
+    """
+    if retry_delays is None:
+        retry_delays = DEMAND_RETRY_DELAYS_S
+    for attempt, delay in enumerate((*retry_delays, None), start=1):
         try:
             return await get_problem_demands()
         except Exception as error:
@@ -252,7 +262,7 @@ GENERATE_STEPS: dict[str, Step] = {
 
 async def run_generate(only: str | None = None) -> None:
     """
-    01:00 생성 배치. 스케줄러가 부른다.
+    생성 배치. 스케줄러가 GENERATE_HOUR에 부른다.
 
     예외를 올리지 않는다. 스케줄러는 결과를 보지 않으므로 로그로 남긴다.
     한 단계가 실패해도 다음 단계는 돈다.
@@ -277,3 +287,29 @@ async def run_generate(only: str | None = None) -> None:
     except Exception:
         # 락을 잡는 DB 연결부터 실패한 경우
         logger.exception("생성 배치를 시작하지 못함")
+
+
+async def build_plan() -> BatchPlan:
+    """
+    생성 배치가 지금 돈다면 무엇을 몇 개 만들지 계산한다. 아무것도 쓰지 않는다.
+
+    Spring 조회는 재시도하지 않는다. 보기만 하는 기능이라 기다릴 이유가 없고,
+    API로 부르면 재시도 대기가 ALB timeout을 넘긴다.
+    """
+    demands = await fetch_demands(retry_delays=())
+    pending = await load_pending(ProblemPurpose.NORMAL)
+    daily_pending = sum((await load_pending(ProblemPurpose.DAILY)).values())
+    battle_pending = await load_battle_pending()
+    plan = plan_generation(demands or [], pending)
+
+    return BatchPlan(
+        spring_item_count=None if demands is None else len(demands),
+        pending_normal=sum(pending.values()),
+        pending_daily=daily_pending,
+        pending_battle=battle_pending,
+        items=[
+            PlanItem(category=category, difficulty=difficulty, count=need)
+            for (category, difficulty), need in plan.items()
+        ],
+        total=sum(plan.values()),
+    )

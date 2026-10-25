@@ -24,7 +24,7 @@ async def generate_one(category: Category, trigger: Trigger) -> Problem | None:
 
     Parameters:
         category (Category): 생성할 카테고리
-        trigger (Trigger): 생성 경로. BATCH로 만든 문제만 새벽에 전송된다
+        trigger (Trigger): 생성 경로. BATCH로 만든 문제만 배치로 전송된다
 
     Returns:
         Problem | None: 생성한 문제. 실패하면 None
@@ -45,7 +45,7 @@ async def generate_daily_problems(trigger: Trigger) -> list[Problem]:
     부족한 만큼 다시 시도하며, MAX_ROUNDS회를 넘기면 만들어진 만큼 반환한다.
 
     Parameters:
-        trigger (Trigger): API 호출이면 ON_DEMAND, 새벽 배치면 BATCH
+        trigger (Trigger): API 호출이면 ON_DEMAND, 배치면 BATCH
 
     Returns:
         list[Problem]: 생성한 문제 목록. 최대 DAILY_COUNT개

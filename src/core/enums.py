@@ -10,7 +10,7 @@ class Difficulty(StrEnum):
 
 
 class Trigger(StrEnum):
-    """문제를 만든 경로. BATCH로 만든 문제만 새벽 전송 대상이다."""
+    """문제를 만든 경로. BATCH로 만든 문제만 배치 전송 대상이다."""
 
     BATCH = "BATCH"
     ON_DEMAND = "ON_DEMAND"  # API 응답으로 이미 Spring에 나감
@@ -27,7 +27,15 @@ class LockKey(IntEnum):
     """Postgres advisory lock 키. DB 전체에서 하나의 이름공간이라 한곳에 모은다."""
 
     BATCH_GENERATE = 1001
-    BATCH_SEND = 1002  # 생성과 키가 달라야 생성 중에도 3시 전송이 돈다
+    BATCH_SEND = 1002  # 생성과 키가 달라야 생성 중에도 전송이 돈다
+
+
+class BatchStep(StrEnum):
+    """배치 단계. 관리자 API에서 한 단계만 돌릴 때 고른다."""
+
+    DAILY = "daily"
+    BATTLE = "battle"
+    NORMAL = "normal"
 
 
 class Language(StrEnum):
@@ -134,5 +142,8 @@ class ErrorCode(StrEnum):
 
     PROBLEM_GENERATION_FAILED = "PROBLEM_GENERATION_FAILED"
     EVALUATION_FAILED = "EVALUATION_FAILED"
+
+    UNAUTHORIZED = "UNAUTHORIZED"
+    BATCH_ALREADY_RUNNING = "BATCH_ALREADY_RUNNING"
 
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"

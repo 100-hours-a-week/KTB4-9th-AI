@@ -196,7 +196,7 @@ async def generate_problem(state: GraphState) -> dict:
     """
     요청 난이도·카테고리로 문제 지문, 제약, 공개 예시, 핵심 풀이 아이디어를 생성한다.
 
-    새벽 배치(Trigger.BATCH)면 vLLM 모델로 만들고, 안 되면 Gemini로 폴백한다.
+    배치(Trigger.BATCH)면 vLLM 모델로 만들고, 안 되면 Gemini로 폴백한다.
 
     카테고리는 resolve_category가 정한 값을 쓴다. 요청이 RANDOM이어도
     requested_category는 그대로 두어 폐기 로그에 요청 값이 남게 한다.
@@ -220,7 +220,7 @@ async def generate_problem(state: GraphState) -> dict:
     category = resolve_category(state.requested_category)
     few_shot = await fetch_few_shot(state.requested_difficulty, category, cfg.top_k)
     prompt = build_prompt(state.requested_difficulty, category, few_shot)
-    # 새벽 배치만 vLLM으로 만든다. 온디맨드는 지금처럼 Gemini
+    # 배치만 vLLM으로 만든다. 온디맨드는 지금처럼 Gemini
     local = batch_local_model() if state.trigger is Trigger.BATCH else None
     problem, called = await call_llm_with_fallback(prompt, cfg, GeneratedProblem, local)
 
