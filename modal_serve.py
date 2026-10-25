@@ -46,9 +46,11 @@ def get_gpu_config() -> tuple[any, int]:
     gpu_type = os.environ.get("MODAL_GPU_TYPE", "H200").upper().strip()
 
     if gpu_type == "H200":
-        return modal.gpu.H200(), 1
+        return "H200", 1
     if gpu_type == "B200":
-        return modal.gpu.B200(), 1
+        return "B200", 1
+    if gpu_type == "H100":
+        return modal.gpu.H100(), 1
     if gpu_type in ("2XA100", "2XA100-80GB", "2X_A100"):
         return modal.gpu.A100(count=2, size="80GB"), 2
     if gpu_type in ("A100", "A100-80GB"):
@@ -91,12 +93,11 @@ vllm_image = modal.Image.from_registry(
         modal.Secret.from_name("cosmos-modal-secret", required_keys=[]),
     ],
 )
-@modal.web_server(port=VLLM_PORT, startup_timeout=10 * MINUTES)
 class ModelServer:
     """vLLM OpenAI 호환 서버리스 인스턴스."""
 
-    @modal.enter()
-    def startup(self):
+    @modal.web_server(port=VLLM_PORT, startup_timeout=10 * MINUTES)
+    def serve(self):
         # 최신 캐싱된 가중치를 컨테이너 파일시스템에 즉시 동기화
         volume.reload()
 
@@ -139,16 +140,5 @@ class ModelServer:
         ]
 
         print(f"[vLLM Server] 실행 명령어: {' '.join(cmd)}")
-        self.process = subprocess.Popen(cmd)
-
-    @modal.exit()
-    def stop(self):
-        """컨테이너 종료 시 vLLM 프로세스를 정상 정리한다."""
-        if hasattr(self, "process") and self.process:
-            print("[vLLM Server] 프로세스 종료 신호 전송...")
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-            print("[vLLM Server] 프로세스 정상 종료 완료.")
+        process = subprocess.Popen(cmd)
+        process.wait()
