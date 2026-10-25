@@ -136,7 +136,6 @@ class ModelServer:
             '{"enable_thinking": false}',
             "--api-key",
             api_key,
-            "--disable-log-requests",
         ]
 
         print(f"[vLLM Server] 실행 명령어: {' '.join(cmd)}")
