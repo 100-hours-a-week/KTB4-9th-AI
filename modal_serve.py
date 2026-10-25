@@ -154,5 +154,5 @@ class ModelServer:
         ]
 
         print(f"[vLLM Server] 실행 명령어: {' '.join(cmd)}")
-        process = subprocess.Popen(cmd)
-        process.wait()
+        # @modal.web_server는 함수가 리턴되어야 포트 프록시를 개방하므로 블로킹(wait) 없이 백그라운드로 기동
+        subprocess.Popen(cmd)
