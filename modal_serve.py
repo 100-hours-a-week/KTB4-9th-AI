@@ -69,14 +69,19 @@ def get_gpu_config() -> tuple[any, int]:
 SELECTED_GPU, TENSOR_PARALLEL_SIZE = get_gpu_config()
 
 # 최신 vLLM 및 Qwen3.5 지원을 위한 transformers >= 5.0 설치
-vllm_image = modal.Image.from_registry(
-    "nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.11"
-).pip_install(
-    "vllm>=0.7.0",
-    "transformers>=5.0.0",
-    "huggingface_hub>=0.26.0",
-    "fastapi",
-    "pydantic",
+vllm_image = (
+    modal.Image.from_registry(
+        "nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.11"
+    )
+    .pip_install(
+        "vllm>=0.7.0",
+        "transformers>=5.0.0",
+        "huggingface_hub>=0.26.0",
+        "fastapi",
+        "pydantic",
+    )
+    # CUDA 12.8 환경에서 DeepGEMM NVCC >= 12.9 요구조건 충돌 방지를 위해 비활성화 (FlashInfer 사용)
+    .env({"VLLM_USE_DEEP_GEMM": "0"})
 )
 
 
@@ -100,6 +105,9 @@ class ModelServer:
     def serve(self):
         # 최신 캐싱된 가중치를 컨테이너 파일시스템에 즉시 동기화
         volume.reload()
+
+        # DeepGEMM NVCC 버전 충돌 방지
+        os.environ["VLLM_USE_DEEP_GEMM"] = "0"
 
         model_id = os.environ.get("MODEL_ID", DEFAULT_MODEL_ID)
         api_key = (
