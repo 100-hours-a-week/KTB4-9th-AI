@@ -62,7 +62,7 @@ async def test_passed_problem_is_returned(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_trigger_reaches_finalize(monkeypatch) -> None:
-    """finalize가 trigger를 저장해야 새벽 전송이 배치 문제만 고른다."""
+    """finalize가 trigger를 저장해야 배치 전송이 배치 문제만 고른다."""
     seen: list[BattleState] = []
 
     async def capture(state: BattleState) -> dict:

@@ -4,6 +4,7 @@ from src.batch import __main__ as module
 from src.batch.__main__ import main, parse_args
 from src.batch.generate import GENERATE_STEPS
 from src.batch.send import SEND_STEPS
+from src.core.enums import BatchStep
 
 
 def fix_engine(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -94,3 +95,11 @@ async def test_pool_is_closed_even_when_the_job_fails(monkeypatch) -> None:
     with pytest.raises(RuntimeError):
         await main("generate")
     assert closed == ["closed"]
+
+
+def test_api_steps_match_batch_steps() -> None:
+    """관리자 API의 only 선택지와 배치 단계 이름이 같아야 한다.
+
+    BatchStep에만 있는 값을 고르면 실행할 단계가 없어 아무것도 안 하고 202가 나간다.
+    """
+    assert set(BatchStep) == set(GENERATE_STEPS)

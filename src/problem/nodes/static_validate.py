@@ -108,11 +108,16 @@ async def static_validate(state: GraphState) -> dict:
             f"요청 {state.requested_difficulty.value} / 생성 {state.difficulty.value}",
         )
 
-    # 4. 예시 출력 자료형 불일치
+    # 4. 예시 입력 형식과 출력 자료형
     output_constraints = [
         c for c in state.input_constraints if c.scope == ConstraintScope.OUTPUT
     ]
     for idx, example in enumerate(state.problem_examples, start=1):
+        if "=" in example.input:
+            return discard(
+                DiscardReason.VALIDATION_FAILED,
+                f"예시 {idx}: input이 표준 입력 형식이 아님 (등호 포함)",
+            )
         tokens = example.output.split()
         if not tokens:
             return discard(DiscardReason.MISMATCH_TYPE, f"예시 {idx}: 출력이 비었음")

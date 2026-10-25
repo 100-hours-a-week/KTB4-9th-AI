@@ -30,7 +30,9 @@ async def generate_problem(state: GraphState) -> dict:
         "problem_content": "두 원소의 합이 M이 되는 쌍의 개수를 구하시오.",
         "input_format": "첫째 줄에 N과 M, 둘째 줄에 N개의 정수가 주어진다.",
         "output_format": "쌍의 개수를 출력한다.",
-        "problem_examples": [ProblemExample(input="5 6\n1 2 3 4 5", output="2")],
+        "problem_examples": [
+            ProblemExample(input="5 6\n1 2 3 4 5", description="계산 과정", output="2")
+        ],
         "input_constraints": [
             InputConstraint(
                 target="N",
@@ -55,6 +57,11 @@ async def generate_problem(state: GraphState) -> dict:
 
 async def check_duplicate(state: GraphState) -> dict:
     """항상 신규로 판정한다."""
+    return {}
+
+
+async def check_contradiction(state: GraphState) -> dict:
+    """항상 통과로 판정한다."""
     return {}
 
 
@@ -93,6 +100,7 @@ async def discard_problem(state: GraphState) -> dict:
 OFFLINE_NODES = {
     # LLM 호출
     "generate_problem": generate_problem,
+    "check_contradiction": check_contradiction,
     "generate_ref_code": generate_ref_code,
     "semantic_validate": semantic_validate,
     "generate_testcase": generate_testcase,

@@ -73,7 +73,7 @@ class GeneratedProblem(Base):
     hint_comments: Mapped[JsonList] = mapped_column(JSONB)  # list[HintComment]
     solution_keywords: Mapped[list[str]] = mapped_column(JSONB)  # 채점 키워드
 
-    # 새벽 전송은 trigger=BATCH만 보내고, purpose로 엔드포인트를 고른다.
+    # 배치 전송은 trigger=BATCH만 보내고, purpose로 엔드포인트를 고른다.
     trigger: Mapped[Trigger] = mapped_column(
         _enum_col(Trigger), server_default=Trigger.ON_DEMAND.value
     )
@@ -203,7 +203,7 @@ class FewshotSeed(Base):
 class BattleProblem(Base):
     """배틀 문제. 하루 한 번 생성하며 일반 문제와 분리해 보관한다.
 
-    새벽 전송은 trigger=BATCH이고 sent_at이 빈 행만 보낸다.
+    배치 전송은 trigger=BATCH이고 sent_at이 빈 행만 보낸다.
     """
 
     __tablename__ = "battle_problems"

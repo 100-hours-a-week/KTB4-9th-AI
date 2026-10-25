@@ -6,6 +6,8 @@ Fixes 100-hours-a-week/KTB4-9th-AI{#이슈 번호 기입}
 
 - [ ] Target Branch를 올바르게 설정했나요?
 - [ ] Reviewers/Assignees/Labels을 알맞게 설정했나요?
+- [ ] `uv run ruff check .` 를 통과했나요?
+- [ ] `uv run python -m pytest -q` 를 통과했나요?
 
 ## 🏁 작업 내용
 

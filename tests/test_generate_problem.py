@@ -4,10 +4,14 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from src.core.enums import Category, ConstraintDataType, Difficulty, Language
+from src.client import llm
+from src.client.llm import LocalModel, current_local_model, use_local_model
+from src.core.config import get_settings
+from src.core.enums import Category, ConstraintDataType, Difficulty, Language, Trigger
 from src.core.exception import LLMOutputParseError
 from src.problem.nodes import generate_problem as module
 from src.problem.nodes.generate_problem import (
+    PROMPT_VERSION,
     RESPONSE_CATEGORIES,
     GeneratedProblem,
     build_prompt,
@@ -29,7 +33,7 @@ VALID_PROBLEM = {
     "input_format": "첫째 줄에 N이 주어진다.",
     "output_format": "방법의 수를 출력한다.",
     "problem_examples": [
-        {"input": "3", "output": "3", "explanation": "1+1+1, 1+2, 2+1"}
+        {"input": "3", "description": "1+1+1, 1+2, 2+1", "output": "3"}
     ],
     "input_constraints": [
         {
@@ -58,16 +62,26 @@ def fix_structured_response(
     monkeypatch: pytest.MonkeyPatch,
     result: GeneratedProblem | None = None,
     error: Exception | None = None,
-) -> None:
-    """구조화 호출 대신 정해진 객체나 에러를 돌려주도록 바꿔 끼운다."""
+) -> list:
+    """구조화 호출 대신 정해진 객체나 에러를 돌려주도록 바꿔 끼운다.
+
+    재시도·폴백 헬퍼는 진짜로 돌게 두고, 그 아래의 call_llm_structured만 바꾼다.
+    그래야 node_models 기록까지 실제 경로로 확인된다.
+
+    Returns:
+        list: 호출될 때마다 그 순간의 로컬 모델(없으면 None)이 담긴다
+    """
+    seen: list = []
 
     async def fake(prompt: str, cfg, schema):
+        seen.append(current_local_model())
         if error:
             raise error
         return result
 
-    monkeypatch.setattr(module, "call_llm_structured", fake)
+    monkeypatch.setattr(llm, "call_llm_structured", fake)
     fix_few_shot(monkeypatch, [])
+    return seen
 
 
 def fix_few_shot(monkeypatch: pytest.MonkeyPatch, problems: list[dict]) -> dict:
@@ -120,8 +134,18 @@ def make_seed() -> SimpleNamespace:
     )
 
 
-def make_state(category: str = "DP") -> GraphState:
-    return GraphState(requested_difficulty="LV2", requested_category=category)
+def make_state(
+    category: str = "DP", trigger: Trigger = Trigger.ON_DEMAND
+) -> GraphState:
+    return GraphState(
+        requested_difficulty="LV2", requested_category=category, trigger=trigger
+    )
+
+
+def set_batch_model(monkeypatch: pytest.MonkeyPatch, model: str | None) -> None:
+    """배치가 부를 vLLM 모델 이름을 테스트 값으로 바꾼다."""
+    monkeypatch.setattr(get_settings(), "batch_local_model", model)
+    monkeypatch.setattr(get_settings(), "batch_local_thinking", None)
 
 
 @pytest.mark.asyncio
@@ -140,6 +164,29 @@ async def test_구조화_응답을_상태_필드로_옮긴다(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_로컬_모델_블록_밖이면_설정의_Gemini_모델을_기록한다(monkeypatch):
+    fix_structured_response(monkeypatch, result=make_problem())
+    result = await generate_problem(make_state())
+
+    recorded = result["node_models"]["generate_problem"]
+    assert recorded.model_name == get_settings().llm_models.generate_problem
+    assert recorded.temperature is None
+    assert recorded.prompt_version == PROMPT_VERSION
+
+
+@pytest.mark.asyncio
+async def test_로컬_모델_블록_안이면_실제로_부른_모델을_기록한다(monkeypatch):
+    fix_structured_response(monkeypatch, result=make_problem())
+    with use_local_model(LocalModel(model_name="qwen-test", temperature=0.6)):
+        result = await generate_problem(make_state())
+
+    recorded = result["node_models"]["generate_problem"]
+    assert recorded.model_name == "qwen-test", "Gemini 이름이 남으면 분석이 틀린다"
+    assert recorded.temperature == 0.6
+    assert recorded.prompt_version == PROMPT_VERSION
+
+
+@pytest.mark.asyncio
 async def test_RANDOM이면_코드가_고른_카테고리로_조회하고_생성한다(monkeypatch):
     prompts: list[str] = []
 
@@ -147,7 +194,7 @@ async def test_RANDOM이면_코드가_고른_카테고리로_조회하고_생성
         prompts.append(prompt)
         return make_problem(category="GRAPH")
 
-    monkeypatch.setattr(module, "call_llm_structured", fake)
+    monkeypatch.setattr(llm, "call_llm_structured", fake)
     monkeypatch.setattr(module.random, "choice", lambda _: Category.GRAPH)
     seen = fix_few_shot(monkeypatch, [])
 
@@ -228,7 +275,7 @@ async def test_참고_문제를_프롬프트에_넣는다(monkeypatch):
         prompts.append(prompt)
         return make_problem()
 
-    monkeypatch.setattr(module, "call_llm_structured", fake)
+    monkeypatch.setattr(llm, "call_llm_structured", fake)
     fix_few_shot(monkeypatch, [{"problem_title": "피보나치 수"}])
 
     await generate_problem(make_state())
@@ -271,3 +318,42 @@ async def test_시드_조회가_실패하면_빈_목록으로_진행한다(monke
     monkeypatch.setattr(module, "session_scope", broken_scope)
 
     assert await fetch_few_shot(Difficulty.LV2, Category.DP, 3) == []
+
+
+@pytest.mark.asyncio
+async def test_배치면_vLLM으로_만들고_그_모델을_기록한다(monkeypatch):
+    set_batch_model(monkeypatch, "qwen-batch")
+    seen = fix_structured_response(monkeypatch, result=make_problem())
+
+    result = await generate_problem(make_state(trigger=Trigger.BATCH))
+
+    assert [m.model_name for m in seen] == ["qwen-batch"], (
+        "배치인데 vLLM으로 가지 않았다"
+    )
+    recorded = result["node_models"]["generate_problem"]
+    assert recorded.model_name == "qwen-batch"
+    assert recorded.prompt_version == PROMPT_VERSION
+
+
+@pytest.mark.asyncio
+async def test_온디맨드면_배치_모델이_있어도_Gemini로_만든다(monkeypatch):
+    set_batch_model(monkeypatch, "qwen-batch")
+    seen = fix_structured_response(monkeypatch, result=make_problem())
+
+    result = await generate_problem(make_state(trigger=Trigger.ON_DEMAND))
+
+    assert seen == [None], "온디맨드가 vLLM으로 갔다"
+    recorded = result["node_models"]["generate_problem"]
+    assert recorded.model_name == get_settings().llm_models.generate_problem
+
+
+@pytest.mark.asyncio
+async def test_배치라도_배치_모델이_없으면_Gemini로_만든다(monkeypatch):
+    set_batch_model(monkeypatch, None)
+    seen = fix_structured_response(monkeypatch, result=make_problem())
+
+    result = await generate_problem(make_state(trigger=Trigger.BATCH))
+
+    assert seen == [None]
+    recorded = result["node_models"]["generate_problem"]
+    assert recorded.model_name == get_settings().llm_models.generate_problem
