@@ -81,7 +81,10 @@ vllm_image = (
         "pydantic",
     )
     # CUDA 12.8 환경에서 DeepGEMM NVCC >= 12.9 요구조건 충돌 방지를 위해 비활성화 (FlashInfer 사용)
-    .env({"VLLM_USE_DEEP_GEMM": "0"})
+    .env({
+        "VLLM_USE_DEEP_GEMM": "0",
+        "MODEL_ID": os.environ.get("MODEL_ID", DEFAULT_MODEL_ID),
+    })
 )
 
 

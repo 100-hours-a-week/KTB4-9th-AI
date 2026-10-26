@@ -51,7 +51,10 @@ jobs:
 
     env:
       LABEL: eval-${{ github.run_id }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       MODAL_GPU_TYPE: ${{ inputs.gpu_type }}
+      MODEL_ID: ${{ inputs.model_id }}
       VLLM_URL: ${{ secrets.VLLM_URL }}
       VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -87,6 +90,46 @@ jobs:
           uv sync --locked --group dev
           # MLflow 기록을 위해 mlflow 패키지 추가 설치
           uv pip install mlflow boto3
+
+      - name: 0단계 - Modal 서버리스 vLLM 인스턴스 배포 및 활성화
+        run: |
+          echo "=================================================="
+          echo "Modal vLLM 서버리스 배포 시작"
+          echo "- 모델: ${{ inputs.model_id }}"
+          echo "- GPU: ${{ inputs.gpu_type }}"
+          echo "=================================================="
+          uv run --with modal modal deploy modal_serve.py
+
+      - name: 0.5단계 - vLLM 추론 엔드포인트 기동 상태 확인
+        run: |
+          echo "=================================================="
+          echo "vLLM 추론 엔드포인트 상태 확인 중..."
+          echo "=================================================="
+          BASE_ENDPOINT="${VLLM_URL%/v1}"
+          HEALTH_URL="${BASE_ENDPOINT}/v1/models"
+          echo "확인 대상 URL: ${HEALTH_URL}"
+
+          SUCCESS=0
+          for i in {1..25}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${VLLM_API_KEY}" \
+              --max-time 15 \
+              "${HEALTH_URL}" || true)
+
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "✅ vLLM 서버 준비 완료 (HTTP 200)"
+              SUCCESS=1
+              break
+            fi
+
+            echo "vLLM 서버 기동 대기 중 (시도 ${i}/25, 응답 코드: ${HTTP_CODE})... 10초 후 재시도"
+            sleep 10
+          done
+
+          if [ "${SUCCESS}" -ne 1 ]; then
+            echo "❌ vLLM 서버 기동 확인 실패 (타임아웃)"
+            exit 1
+          fi
 
       - name: 1단계 - AI 팀 평가기 실행 (evals.generate)
         run: |
