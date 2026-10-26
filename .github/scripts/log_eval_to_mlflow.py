@@ -21,12 +21,15 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from langfuse import Langfuse  # noqa: E402
+
 from evals.summarize import collect, stage_of  # noqa: E402
 from src.client.langfuse import (  # noqa: E402
     flush_langfuse,
     get_gpu_hourly_rate,
     get_langfuse_client,
     get_langfuse_urls,
+    langfuse_observation,
 )
 
 logging.basicConfig(
@@ -168,6 +171,7 @@ def main():
             gpu_rate = summary_data["gpu_hourly_rate_usd"]
             bill_sec = summary_data["billable_gpu_seconds"]
 
+            # 세션 레벨 요약 점수
             lf_client.create_score(
                 name="usable_pass_rate",
                 value=summary_data["usable_rate"],
@@ -186,8 +190,83 @@ def main():
                 session_id=args.label,
                 comment=f"{gpu_name} (${gpu_rate}/h, 가동 {bill_sec}s)",
             )
+
+            # 최종 평가 성적표(summary.md) 원문을 담은 최상단 요약 트레이스 발행
+            summary_md_path = results_dir / "summary.md"
+            summary_markdown = (
+                summary_md_path.read_text(encoding="utf-8")
+                if summary_md_path.exists()
+                else json.dumps(summary_data, ensure_ascii=False, indent=2)
+            )
+
+            summary_trace_id = Langfuse.create_trace_id(
+                seed=f"{args.label}:SUMMARY"
+            )
+            gh_run_id = os.environ.get("GITHUB_RUN_ID", "")
+            gh_repo = os.environ.get("GITHUB_REPOSITORY", "")
+            gh_server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+            gh_run_url = (
+                f"{gh_server}/{gh_repo}/actions/runs/{gh_run_id}"
+                if gh_run_id
+                else None
+            )
+
+            summary_input = {
+                "track_type": args.track_type,
+                "model_id": args.model_id,
+                "prompt_version": args.prompt_version,
+                "gpu_type": gpu_name,
+                "gpu_hourly_rate_usd": gpu_rate,
+                "total_requests": summary_data["total_requests"],
+                "determined_requests": det_cnt,
+                "passed_count": passed_cnt,
+                "usable_count": usable_cnt,
+                "usable_rate": summary_data["usable_rate"],
+                "billable_gpu_seconds": bill_sec,
+                "estimated_gpu_cost_usd": summary_data["estimated_gpu_cost_usd"],
+                "github_run_url": gh_run_url,
+            }
+
+            with langfuse_observation(
+                name=f"summary:{args.label}",
+                as_type="generation",
+                trace_context={"trace_id": summary_trace_id},
+                session_id=args.label,
+                trace_name=f"{args.label}:SUMMARY",
+                tags=["summary", args.track_type, gpu_name],
+                version=args.prompt_version,
+                model=args.model_id,
+                input=summary_input,
+                output=summary_markdown,
+                metadata=summary_data,
+            ):
+                pass
+
+            # 요약 트레이스에 점수 태깅
+            usable_pct = summary_data["usable_rate"] * 100
+            lf_client.create_score(
+                trace_id=summary_trace_id,
+                name="usable",
+                value=1 if summary_data["usable_rate"] >= 0.7 else 0,
+                comment=f"실질 통과율 {usable_pct:.1f}% ({usable_cnt}/{det_cnt})",
+            )
+            lf_client.create_score(
+                trace_id=summary_trace_id,
+                name="gpu_cost_usd",
+                value=summary_data["estimated_gpu_cost_usd"],
+                comment=f"{gpu_name} (${gpu_rate}/h, 가동 {bill_sec}s)",
+            )
+            lf_client.create_score(
+                trace_id=summary_trace_id,
+                name="outcome",
+                value="COMPLETED",
+                comment=f"실질 통과 {usable_cnt}/{det_cnt}건 ({usable_pct:.1f}%)",
+            )
+
             flush_langfuse()
-            logger.info("Langfuse 세션(%s) 요약 점수 기록 완료", args.label)
+            logger.info(
+                "Langfuse 세션(%s) 요약 점수 및 SUMMARY 트레이스 기록 완료", args.label
+            )
         except Exception as error:  # noqa: BLE001
             logger.warning("Langfuse 세션 점수 기록 중 오류 발생: %s", error)
 
