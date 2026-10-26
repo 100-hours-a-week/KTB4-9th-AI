@@ -26,6 +26,7 @@ from src.client.langfuse import (  # noqa: E402
     flush_langfuse,
     get_gpu_hourly_rate,
     get_langfuse_client,
+    get_langfuse_urls,
 )
 
 logging.basicConfig(
@@ -267,9 +268,7 @@ def main():
     summary_md_file = results_dir / "summary.md"
     step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if step_summary_path and summary_md_file.exists():
-        langfuse_host = os.environ.get(
-            "LANGFUSE_HOST", "https://jp.cloud.langfuse.com"
-        ).rstrip("/")
+        lf_urls = get_langfuse_urls(args.label)
         gpu_name = summary_data["gpu_type"]
         gpu_rate = summary_data["gpu_hourly_rate_usd"]
         wall_dur = format_duration(summary_data["generation_wall_seconds"])
@@ -308,8 +307,12 @@ def main():
                 f"**`{u_rate:.0%}`** (`{u_cnt} / {d_cnt}건`) |\n"
             )
             out.write(
-                "| **🔎 Langfuse 대시보드** | "
-                f"[Langfuse 열기 (`session_id = {args.label}`)]({langfuse_host}) |\n\n"
+                "| **🔎 Langfuse 세션 분석** | "
+                f"[세션 대시보드 열기 (`{args.label}`)]({lf_urls['session']}) |\n"
+            )
+            out.write(
+                "| **📊 Langfuse 트레이스 & Scores** | "
+                f"[트레이스 그래프 및 점수 보기]({lf_urls['traces']}) |\n\n"
             )
             out.write("---\n\n")
             out.write(src.read())

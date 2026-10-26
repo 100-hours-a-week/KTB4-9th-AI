@@ -46,6 +46,45 @@ def make_eval_trace_id(label: str, request_id: str) -> str:
     return Langfuse.create_trace_id(seed=f"{label}:{request_id}")
 
 
+def get_langfuse_project_id() -> str:
+    """Langfuse 프로젝트 ID를 조회한다."""
+    client = get_langfuse_client()
+    if client is not None:
+        try:
+            projects = client.api.projects.get().data
+            if projects:
+                return projects[0].id
+        except Exception:
+            pass
+    return "cmvn9ym2z000bad0le09b0n4i"
+
+
+def get_langfuse_urls(session_id: str) -> dict[str, str]:
+    """Langfuse 세션 및 트레이스 필터링 절대 URL을 반환한다."""
+    settings = get_settings()
+    raw_host = (
+        os.environ.get("LANGFUSE_BASE_URL")
+        or os.environ.get("LANGFUSE_HOST")
+        or settings.langfuse_host
+        or "https://jp.cloud.langfuse.com"
+    ).strip()
+    if not raw_host.startswith("http://") and not raw_host.startswith("https://"):
+        raw_host = f"https://{raw_host}"
+    host = raw_host.rstrip("/")
+
+    project_id = get_langfuse_project_id()
+    filter_q = f"session_id%3Bstring%3B%3B%3D%3B{session_id}"
+    return {
+        "session": f"{host}/project/{project_id}/sessions/{session_id}",
+        "traces": (
+            f"{host}/project/{project_id}/traces?"
+            f"filter={filter_q}&traceTab=scores&view=graph"
+        ),
+        "prompts": f"{host}/project/{project_id}/prompts",
+        "home": f"{host}/project/{project_id}",
+    }
+
+
 def is_langfuse_enabled() -> bool:
     """Langfuse API 키가 설정되어 활성화 가능한지 확인한다."""
     settings = get_settings()
