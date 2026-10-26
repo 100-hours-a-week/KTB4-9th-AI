@@ -290,8 +290,12 @@ def get_local_client() -> AsyncOpenAI:
     from langfuse.openai import AsyncOpenAI
     from langsmith.wrappers import wrap_openai
 
+    vllm_base = settings.vllm_url.rstrip("/")
+    if not vllm_base.endswith("/v1"):
+        vllm_base = f"{vllm_base}/v1"
+
     client = AsyncOpenAI(
-        base_url=f"{settings.vllm_url.rstrip('/')}/v1",
+        base_url=vllm_base,
         api_key=settings.vllm_api_key,
         max_retries=0,
     )
