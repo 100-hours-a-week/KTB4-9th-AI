@@ -160,7 +160,7 @@ jobs:
           echo "=================================================="
           echo "평가 3단계 (비교표 요약) 시작"
           echo "=================================================="
-          uv run python -m evals.summarize --label "${LABEL}"
+          uv run python -m evals.summarize "${LABEL}" --out "evals/results/${LABEL}/summary.md"
 
       - name: 4단계 - MLflow 및 S3에 메트릭 기록
         continue-on-error: true
