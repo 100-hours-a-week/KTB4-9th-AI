@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import uuid
 from pathlib import Path
 
 from sqlalchemy import delete
@@ -29,8 +30,10 @@ async def seed_fewshot(jsonl_path: Path | None = None) -> int:
         await session.execute(delete(FewshotSeed))
 
         for row in rows:
+            raw_id = row.get("id")
+            parsed_id = uuid.UUID(raw_id) if isinstance(raw_id, str) else raw_id
             seed = FewshotSeed(
-                id=row["id"],
+                id=parsed_id,
                 source=SeedSource(row["source"]),
                 source_ref=row.get("source_ref"),
                 category=Category(row["category"]),
