@@ -116,13 +116,14 @@ jobs:
           # MLflow 기록을 위해 mlflow 패키지 추가 설치
           uv pip install mlflow boto3
 
-      - name: 0.2단계 - 로컬 DB 마이그레이션 및 Few-shot 시드 적재
+      - name: 0.2단계 - 로컬 DB 마이그레이션 및 Few-shot·Langfuse 리소스 동기화
         run: |
           echo "=================================================="
           echo "로컬 PostgreSQL 스키마 마이그레이션 및 시드 적재"
           echo "=================================================="
           uv run alembic upgrade head
           uv run python -m src.db.seed_fewshot
+          uv run python -m src.client.langfuse_setup
 
       - name: 0단계 - Modal 서버리스 vLLM 인스턴스 배포 및 활성화
         run: |

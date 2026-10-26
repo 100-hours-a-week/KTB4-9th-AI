@@ -12,6 +12,7 @@ from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, ValidationError, model_validator
 
+from src.client.langfuse import langfuse_prompt_context
 from src.core.config import get_settings
 from src.core.exception import LLMOutputParseError
 
@@ -257,19 +258,20 @@ async def call_llm_structured[T: BaseModel](
     Raises:
         LLMOutputParseError: 응답이 형식에 맞지 않거나 비어 있는 경우
     """
-    local = _local_model.get()
-    if local is not None:
-        return await call_local_structured(prompt, local, schema)
+    with langfuse_prompt_context(cfg.prompt_version):
+        local = _local_model.get()
+        if local is not None:
+            return await call_local_structured(prompt, local, schema)
 
-    structured = build_chat_model(cfg).with_structured_output(schema)
-    try:
-        result = await structured.ainvoke(prompt)
-    except (OutputParserException, ValueError) as error:
-        raise LLMOutputParseError(f"구조화 응답 해석 실패: {error}") from error
+        structured = build_chat_model(cfg).with_structured_output(schema)
+        try:
+            result = await structured.ainvoke(prompt)
+        except (OutputParserException, ValueError) as error:
+            raise LLMOutputParseError(f"구조화 응답 해석 실패: {error}") from error
 
-    if not isinstance(result, schema):
-        raise LLMOutputParseError("구조화 응답이 비어 있음")
-    return result
+        if not isinstance(result, schema):
+            raise LLMOutputParseError("구조화 응답이 비어 있음")
+        return result
 
 
 @lru_cache

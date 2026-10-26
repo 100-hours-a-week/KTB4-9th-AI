@@ -106,6 +106,26 @@ def get_langfuse_callback_handler(
 
 
 @contextmanager
+def langfuse_prompt_context(prompt_version: str | None) -> Iterator[None]:
+    """코드의 PROMPT_VERSION을 Langfuse Prompt 레지스트리에 자동 연결한다."""
+    if not prompt_version or not is_langfuse_enabled():
+        with nullcontext():
+            yield
+        return
+
+    prompt_name = prompt_version.split("/", 1)[0]
+    try:
+        with propagate_attributes(
+            version=prompt_version,
+            prompt={"name": prompt_name, "version": 1},
+        ):
+            yield
+    except Exception:
+        with nullcontext():
+            yield
+
+
+@contextmanager
 def langfuse_observation(
     name: str,
     *,
@@ -122,6 +142,11 @@ def langfuse_observation(
     """
     client = get_langfuse_client()
     if client is not None:
+        prompt_ref = (
+            {"name": version.split("/", 1)[0], "version": 1}
+            if version and "/" in version
+            else None
+        )
         try:
             with (
                 client.start_as_current_observation(name=name, **kwargs) as obs,
@@ -130,6 +155,7 @@ def langfuse_observation(
                     tags=tags,
                     trace_name=trace_name,
                     version=version,
+                    prompt=prompt_ref,
                 ),
             ):
                 yield obs
