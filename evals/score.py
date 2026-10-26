@@ -51,7 +51,13 @@ from evals.generate import META_FILE as GENERATE_META_FILE
 from evals.generate import ROWS_FILE as GENERATIONS_FILE
 from evals.generate import GenerationRow
 from evals.requests import EvalRequest, load_requests
-from src.client.langfuse import flush_langfuse, get_langfuse_callback_handler
+from src.client.langfuse import (
+    flush_langfuse,
+    get_gpu_hourly_rate,
+    get_langfuse_callback_handler,
+    langfuse_observation,
+    make_eval_trace_id,
+)
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, DiscardReason
 from src.problem.graph import DEFAULT_NODES, PARALLEL_NODES, NodeFn, build_graph
@@ -187,6 +193,11 @@ async def score_one(
         requested_difficulty=request.difficulty,
         requested_category=request.category,
     )
+    gpu_type, _ = get_gpu_hourly_rate()
+    trace_id = make_eval_trace_id(label, request.id)
+    trace_name = (
+        f"{label}:{request.id}:{request.difficulty.value}:{request.category.value}"
+    )
     config = {
         "run_name": f"score:{label}",
         "tags": [EVAL_TAG, label],
@@ -198,7 +209,9 @@ async def score_one(
             "category": request.category.value,
         },
     }
-    langfuse_handler = get_langfuse_callback_handler()
+    langfuse_handler = get_langfuse_callback_handler(
+        trace_context={"trace_id": trace_id}
+    )
     if langfuse_handler is not None:
         config["callbacks"] = [langfuse_handler]
 
@@ -206,44 +219,99 @@ async def score_one(
     start = time.perf_counter()
     result: GraphState | None = None
     error: Exception | None = None
-    try:
-        values = await graph.ainvoke(
-            state, config=config, interrupt_before=PARALLEL_NODES
-        )
-        result = GraphState(**values)
-    except Exception as exc:
-        error = exc
-    finally:
-        _trace.reset(token)
+    with langfuse_observation(
+        name=f"score:{label}",
+        as_type="chain",
+        trace_context={"trace_id": trace_id},
+        session_id=label,
+        trace_name=trace_name,
+        tags=[EVAL_TAG, label, generation.model, gpu_type],
+        input={
+            "request_id": request.id,
+            "problem_title": (generation.output or {}).get("problem_title"),
+        },
+        metadata={
+            "eval_label": label,
+            "model": generation.model,
+            "gpu_type": gpu_type,
+            "request_id": request.id,
+            "difficulty": request.difficulty.value,
+            "category": request.category.value,
+        },
+    ) as lf_obs:
+        try:
+            values = await graph.ainvoke(
+                state, config=config, interrupt_before=PARALLEL_NODES
+            )
+            result = GraphState(**values)
+        except Exception as exc:
+            error = exc
+        finally:
+            _trace.reset(token)
 
-    row = {
-        "request_id": request.id,
-        "label": label,
-        "model": generation.model,
-        "difficulty": request.difficulty,
-        "category": request.category,
-        "generation_sha": generation_sha(generation.output),
-        "seconds": round(time.perf_counter() - start, 3),
-        "node_seconds": {k: round(v, 3) for k, v in trace.seconds.items()},
-        "node_calls": dict(trace.calls),
-        "started_at": started_at,
-    }
-    if result is None:
-        return ScoreRow(
-            **row,
-            status="error",
-            error_node=trace.error_node,
-            error=f"{type(error).__name__}: {error}",
-        )
-    if result.is_discarded:
-        return ScoreRow(
-            **row,
-            status="discarded",
-            discard_stage=result.discard_stage,
-            discard_reason=result.discard_reason,
-            discard_detail=result.discard_detail,
-        )
-    return ScoreRow(**row, status="passed")
+        row = {
+            "request_id": request.id,
+            "label": label,
+            "model": generation.model,
+            "difficulty": request.difficulty,
+            "category": request.category,
+            "generation_sha": generation_sha(generation.output),
+            "seconds": round(time.perf_counter() - start, 3),
+            "node_seconds": {k: round(v, 3) for k, v in trace.seconds.items()},
+            "node_calls": dict(trace.calls),
+            "started_at": started_at,
+        }
+        if result is None:
+            score_row = ScoreRow(
+                **row,
+                status="error",
+                error_node=trace.error_node,
+                error=f"{type(error).__name__}: {error}",
+            )
+        elif result.is_discarded:
+            score_row = ScoreRow(
+                **row,
+                status="discarded",
+                discard_stage=result.discard_stage,
+                discard_reason=result.discard_reason,
+                discard_detail=result.discard_detail,
+            )
+        else:
+            score_row = ScoreRow(**row, status="passed")
+
+        if lf_obs is not None:
+            try:
+                passed = score_row.status == "passed"
+                outcome_str = (
+                    "PASSED"
+                    if passed
+                    else f"{score_row.discard_stage}:{score_row.discard_reason}"
+                    if score_row.status == "discarded"
+                    else f"ERROR:{score_row.error_node}"
+                )
+                lf_obs.update(
+                    output={
+                        "status": score_row.status,
+                        "outcome": outcome_str,
+                        "discard_detail": score_row.discard_detail,
+                        "node_calls": score_row.node_calls,
+                    }
+                )
+                lf_obs.score_trace(
+                    name="passed",
+                    value=1.0 if passed else 0.0,
+                    comment=score_row.discard_detail or outcome_str,
+                )
+                lf_obs.score_trace(
+                    name="outcome",
+                    value=outcome_str,
+                    data_type="CATEGORICAL",
+                    comment=score_row.discard_detail,
+                )
+            except Exception:
+                pass
+
+    return score_row
 
 
 def is_infra_failure(row: ScoreRow) -> bool:

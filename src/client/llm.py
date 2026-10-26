@@ -298,7 +298,7 @@ def get_local_client() -> AsyncOpenAI:
         base_url=vllm_base,
         api_key=settings.vllm_api_key,
         timeout=300.0,
-        max_retries=2,
+        max_retries=0,
     )
     return wrap_openai(client)
 

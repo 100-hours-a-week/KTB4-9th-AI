@@ -34,6 +34,10 @@ on:
         description: "평가할 요청 건수 (0이면 72건 전체, 스모크 테스트 시 4건 등)"
         required: false
         default: "0"
+      concurrency:
+        description: "동시에 생성할 문제 수 (H200 기준 12 권장)"
+        required: false
+        default: "12"
 
 permissions:
   contents: read
@@ -175,14 +179,23 @@ jobs:
             --label "${LABEL}" \
             --model "${{ inputs.model_id }}" \
             --chat-template-kwargs '{"enable_thinking": false}' \
+            --concurrency "${{ inputs.concurrency || '12' }}" \
             ${LIMIT_OPT}
 
       - name: 2단계 - AI 팀 평가기 채점 (evals.score)
         run: |
+          LIMIT_OPT=""
+          if [ "${{ inputs.limit }}" != "0" ]; then
+            LIMIT_OPT="--limit ${{ inputs.limit }}"
+          fi
+
           echo "=================================================="
           echo "평가 2단계 (채점 및 검증 재생) 시작"
           echo "=================================================="
-          uv run python -m evals.score --label "${LABEL}"
+          uv run python -m evals.score \
+            --label "${LABEL}" \
+            --concurrency 8 \
+            ${LIMIT_OPT}
 
       - name: 3단계 - 비교표 산출 (evals.summarize)
         run: |
@@ -198,7 +211,8 @@ jobs:
             --label "${LABEL}" \
             --track-type "${{ inputs.track_type }}" \
             --model-id "${{ inputs.model_id }}" \
-            --prompt-version "${{ inputs.prompt_version }}"
+            --prompt-version "${{ inputs.prompt_version }}" \
+            --gpu-type "${{ inputs.gpu_type }}"
 
       - name: 평가 결과 아티팩트 보관
         uses: actions/upload-artifact@v4

@@ -80,7 +80,7 @@ vllm_image = (
         "fastapi",
         "pydantic",
     )
-    # CUDA 12.8 환경에서 DeepGEMM NVCC >= 12.9 요구조건 충돌 방지를 위해 비활성화 (FlashInfer 사용)
+    # CUDA 12.8 환경에서 DeepGEMM NVCC 충돌 방지를 위해 비활성화 (FlashInfer 사용)
     .env({
         "VLLM_USE_DEEP_GEMM": "0",
         "MODEL_ID": os.environ.get("MODEL_ID", DEFAULT_MODEL_ID),
@@ -97,12 +97,13 @@ vllm_image = (
     max_containers=1,
     # 60초 유휴 시 컨테이너를 0대로 자동 축소하여 유휴 비용 방어
     scaledown_window=60,
-    timeout=10 * MINUTES,
+    timeout=15 * MINUTES,
     secrets=[
         # MODAL_API_KEY (또는 VLLM_API_KEY) 및 HF_TOKEN 주입
         modal.Secret.from_name("cosmos-modal-secret", required_keys=[]),
     ],
 )
+@modal.concurrent(max_inputs=32)
 class ModelServer:
     """vLLM OpenAI 호환 서버리스 인스턴스."""
 
@@ -143,11 +144,11 @@ class ModelServer:
             "0.0.0.0",
             "--tensor-parallel-size",
             str(TENSOR_PARALLEL_SIZE),
-            # 122B 모델이 140GB H200에 안착할 수 있도록 컨텍스트 길이를 4096으로 조정하고 메모리 점유율을 0.88로 설정
+            # few-shot 프롬프트 + 구조화 출력 여유를 위해 컨텍스트 길이를 8192로 확보
             "--max-model-len",
-            "4096",
+            "8192",
             "--gpu-memory-utilization",
-            "0.88",
+            "0.92",
             "--enforce-eager",
             # Qwen3.5 계열 추론 토큰(<think>) 노출을 서버 레벨에서 원천 차단
             "--default-chat-template-kwargs",
@@ -157,5 +158,5 @@ class ModelServer:
         ]
 
         print(f"[vLLM Server] 실행 명령어: {' '.join(cmd)}")
-        # @modal.web_server는 함수가 리턴되어야 포트 프록시를 개방하므로 블로킹(wait) 없이 백그라운드로 기동
+        # @modal.web_server는 함수가 리턴되어야 포트 프록시를 개방하므로 백그라운드 기동
         subprocess.Popen(cmd)

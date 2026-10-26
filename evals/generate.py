@@ -50,7 +50,12 @@ from evals.common import (
     select_pending,
 )
 from evals.requests import EvalRequest, load_requests
-from src.client.langfuse import flush_langfuse, langfuse_observation
+from src.client.langfuse import (
+    flush_langfuse,
+    get_gpu_hourly_rate,
+    langfuse_observation,
+    make_eval_trace_id,
+)
 from src.client.llm import LocalModel, get_local_client, use_local_model
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty
@@ -100,7 +105,11 @@ def is_retryable(row: GenerationRow) -> bool:
 
 
 async def generate_one(
-    request: EvalRequest, local: LocalModel | None, *, label: str
+    request: EvalRequest,
+    local: LocalModel | None,
+    *,
+    label: str,
+    concurrency: int = 4,
 ) -> GenerationRow:
     """
     요청 하나로 generate_problem 노드를 실행한다. 예외를 올리지 않는다.
@@ -109,11 +118,17 @@ async def generate_one(
         request (EvalRequest): 생성할 요청
         local (LocalModel | None): 로컬 모델. None이면 노드에 적힌 Gemini 모델
         label (str): 실행 이름. 결과와 LangSmith 트레이스에 남는다
+        concurrency (int): 동시 처리 요청 수 (GPU 비용 안분 계산용)
 
     Returns:
         GenerationRow: 생성한 문제 또는 에러
     """
     model = local.model_name if local else GEMINI
+    gpu_type, gpu_hourly_rate = get_gpu_hourly_rate()
+    trace_id = make_eval_trace_id(label, request.id)
+    trace_name = (
+        f"{label}:{request.id}:{request.difficulty.value}:{request.category.value}"
+    )
     random.seed(request.seed)
     state = GraphState(
         requested_difficulty=request.difficulty,
@@ -141,15 +156,24 @@ async def generate_one(
         langfuse_observation(
             name=f"generate:{label}",
             as_type="chain",
+            trace_context={"trace_id": trace_id},
+            session_id=label,
+            trace_name=trace_name,
+            tags=[EVAL_TAG, label, model, gpu_type],
+            version=PROMPT_VERSION,
+            model=model,
             input={"request": request.model_dump(mode="json")},
             metadata={
                 "eval_label": label,
                 "model": model,
+                "gpu_type": gpu_type,
+                "gpu_hourly_rate_usd": gpu_hourly_rate,
+                "prompt_version": PROMPT_VERSION,
                 "request_id": request.id,
                 "difficulty": request.difficulty.value,
                 "category": request.category.value,
             },
-        ),
+        ) as lf_obs,
     ):
         try:
             if local is None:
@@ -162,7 +186,36 @@ async def generate_one(
             )
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
+        elapsed_s = round(time.perf_counter() - start, 3)
+        gpu_cost_usd = (
+            round((elapsed_s / 3600.0) * gpu_hourly_rate / max(concurrency, 1), 5)
+            if local is not None
+            else 0.0
+        )
         run.end(outputs={"output": output, "error": error})
+        if lf_obs is not None:
+            try:
+                lf_obs.update(
+                    output={"output": output, "error": error},
+                    cost_details={"total": gpu_cost_usd},
+                )
+                lf_obs.score_trace(
+                    name="generation_ok",
+                    value=0.0 if error else 1.0,
+                    comment=error or (output or {}).get("problem_title"),
+                )
+                if local is not None:
+                    cost_comment = (
+                        f"{gpu_type} (${gpu_hourly_rate}/h, "
+                        f"concurrency={concurrency}, {elapsed_s:.1f}s)"
+                    )
+                    lf_obs.score_trace(
+                        name="gpu_cost_usd",
+                        value=gpu_cost_usd,
+                        comment=cost_comment,
+                    )
+            except Exception:
+                pass
 
     return GenerationRow(
         request_id=request.id,
@@ -172,7 +225,7 @@ async def generate_one(
         category=request.category,
         status="error" if error else "ok",
         error=error,
-        seconds=round(time.perf_counter() - start, 3),
+        seconds=elapsed_s,
         output=output,
         started_at=started_at,
     )
@@ -292,7 +345,9 @@ async def main(argv: list[str] | None = None) -> None:
         try:
             await run_concurrently(
                 pending,
-                lambda request: generate_one(request, local, label=args.label),
+                lambda request: generate_one(
+                    request, local, label=args.label, concurrency=args.concurrency
+                ),
                 rows_path=rows_path,
                 concurrency=args.concurrency,
                 describe=describe,

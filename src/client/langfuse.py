@@ -12,12 +12,38 @@ from contextlib import contextmanager, nullcontext
 from functools import lru_cache
 from typing import Any
 
-from langfuse import Langfuse
+from langfuse import Langfuse, propagate_attributes
 from langfuse.langchain import CallbackHandler
 
 from src.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Modal / RunPod 시간당 GPU 단가 (USD/hour)
+GPU_HOURLY_RATES_USD: dict[str, float] = {
+    "H200": 4.54,
+    "B200": 6.25,
+    "2XA100": 5.00,
+    "2XA100-80GB": 5.00,
+    "A100": 2.50,
+    "A100-80GB": 2.50,
+    "A100-40GB": 2.10,
+    "H100": 3.95,
+    "L40S": 1.95,
+    "L4": 0.80,
+    "T4": 0.59,
+}
+
+
+def get_gpu_hourly_rate(gpu_type: str | None = None) -> tuple[str, float]:
+    """GPU 기종명과 시간당 과금 단가(USD)를 반환한다."""
+    raw = (gpu_type or os.environ.get("MODAL_GPU_TYPE") or "H200").upper().strip()
+    return raw, GPU_HOURLY_RATES_USD.get(raw, 4.54)
+
+
+def make_eval_trace_id(label: str, request_id: str) -> str:
+    """평가 1단계(생성)와 2단계(채점)를 동일한 Langfuse Trace로 묶는 결정론적 ID."""
+    return Langfuse.create_trace_id(seed=f"{label}:{request_id}")
 
 
 def is_langfuse_enabled() -> bool:
@@ -80,7 +106,15 @@ def get_langfuse_callback_handler(
 
 
 @contextmanager
-def langfuse_observation(name: str, **kwargs: Any) -> Iterator[Any]:
+def langfuse_observation(
+    name: str,
+    *,
+    session_id: str | None = None,
+    tags: list[str] | None = None,
+    trace_name: str | None = None,
+    version: str | None = None,
+    **kwargs: Any,
+) -> Iterator[Any]:
     """Langfuse 관측성 컨텍스트 매니저.
 
     Langfuse가 활성화된 경우 start_as_current_observation 컨텍스트를 시작하고,
@@ -89,7 +123,15 @@ def langfuse_observation(name: str, **kwargs: Any) -> Iterator[Any]:
     client = get_langfuse_client()
     if client is not None:
         try:
-            with client.start_as_current_observation(name=name, **kwargs) as obs:
+            with (
+                client.start_as_current_observation(name=name, **kwargs) as obs,
+                propagate_attributes(
+                    session_id=session_id,
+                    tags=tags,
+                    trace_name=trace_name,
+                    version=version,
+                ),
+            ):
                 yield obs
             return
         except Exception as error:
