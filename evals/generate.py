@@ -155,7 +155,7 @@ async def generate_one(
         ) as run,
         langfuse_observation(
             name=f"generate:{label}",
-            as_type="chain",
+            as_type="generation",
             trace_context={"trace_id": trace_id},
             session_id=label,
             trace_name=trace_name,
@@ -197,7 +197,13 @@ async def generate_one(
             try:
                 lf_obs.update(
                     output={"output": output, "error": error},
+                    model=model,
                     cost_details={"total": gpu_cost_usd},
+                )
+                lf_obs.score_trace(
+                    name="model",
+                    value=model,
+                    data_type="CATEGORICAL",
                 )
                 lf_obs.score_trace(
                     name="generation_ok",
