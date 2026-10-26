@@ -115,30 +115,110 @@ flowchart LR
 
 ---
 
-## 5. Langfuse 대시보드 활용 및 프롬프트 관리
+## 5. Langfuse 대시보드 상세 분석 가이드
 
-모든 평가 과정은 관측 플랫폼인 Langfuse에 실시간 기록된다. 개별 문제의 생성 과정과 탈락 원인을 세밀하게 추적할 수 있다.
+모든 평가 과정은 관측 플랫폼인 Langfuse에 실시간 기록된다. 72건 전체 요약부터 개별 문제의 단계별 입출력과 탈락 원인까지 세밀하게 추적할 수 있다.
 
-### 5.1 주요 대시보드 링크
+### 5.1 Langfuse 계층 구조 이해
 
-- **[프로젝트 홈 대시보드](https://jp.cloud.langfuse.com/project/cmvn9ym2z000bad0le09b0n4i)**: 모델별 호출 횟수, 비용 추이, 전반적인 점수 현황
-- **[세션 목록](https://jp.cloud.langfuse.com/project/cmvn9ym2z000bad0le09b0n4i/sessions)**: 각 평가 단위별 전체 통과율과 소모 비용 확인
-- **[트레이스 및 점수](https://jp.cloud.langfuse.com/project/cmvn9ym2z000bad0le09b0n4i/traces?filter=isRootObservation%3Bboolean%3B%3B%3D%3Btrue&traceTab=scores&view=graph)**: 개별 문제의 생성부터 채점까지 전 단계 흐름 확인
-- **[프롬프트 보관함](https://jp.cloud.langfuse.com/project/cmvn9ym2z000bad0le09b0n4i/prompts)**: 서비스에 사용되는 10종 프롬프트 원문 및 버전 이력
+Langfuse의 데이터는 다음과 같은 3단계 계층 구조로 체계화되어 있다.
 
-### 5.2 실패한 문제 원인 분석 방법
+1. **세션 (`Session`)**:
+   - 1회의 전체 평가 실행 단위다.
+   - 식별자 형식: `eval-<GitHub Run ID>` (예: `eval-40290654411`) 또는 로컬 실행 라벨명
+   - 72건의 문제 평가 요청 전체가 하나의 세션으로 묶여 총 비용과 전체 통과율이 합산된다.
+2. **트레이스 (`Trace`)**:
+   - 1건의 문제 생성 요청 단위다.
+   - 식별자 형식: `<세션ID>:v1-0001:LV3:GREEDY` (문제 번호, 난이도, 알고리즘 유형 포함)
+   - 각 문제마다 1단계 생성과 2단계 채점이 하나의 트레이스 안에 통합되어 기록된다.
+3. **관측 스팬 (`Observations`)**:
+   - 트레이스 내부에서 실행되는 세부 노드별 실행 기록이다.
+   - `generate` 분기: 후보 모델의 문제 생성 노드 (`generate_problem`)
+   - `score` 분기: 정적 검증(`static_validate`) → 논리 모순 검사(`check_contradiction`) → 테스트케이스 생성(`generate_testcase`) → 기준 코드 생성(`generate_ref_code`) → Judge0 실행(`semantic_validate`)
 
-1. GitHub Actions 성적표의 **`트레이스 그래프 및 점수 보기`** 링크 또는 Langfuse 트레이스 탭을 연다.
-2. 각 트레이스를 클릭한 뒤 **그래프 뷰**와 **점수 탭**을 활성화한다.
-3. 확인 가능한 주요 데이터:
-   - **통과 여부 (`passed`)**: `1` (최종 합격) 또는 `0` (폐기)
-   - **폐기 사유 (`outcome`)**: 어느 단계에서 왜 탈락했는지 확인 (예: `semantic_validate:EXAMPLE_MISMATCH`, `check_contradiction:PROBLEM_CONTRADICTION`)
-   - **단계별 입출력 상세**: 각 노드를 클릭하면 모델에 실제로 전달된 프롬프트와 모델이 생성한 원본 응답 전문 확인 가능
+---
 
-### 5.3 프롬프트 수정 및 버전 관리
+### 5.2 주요 화면 바로가기
 
-- 시스템 프롬프트가 변경되면 해당 프롬프트의 버전 식별자가 자동으로 Langfuse 프롬프트 보관함에 새 버전으로 등록된다.
-- 이를 통해 어떤 버전의 프롬프트가 더 높은 실질 통과율을 냈는지 쉽게 비교 분석할 수 있다.
+| 메뉴 | 바로가기 링크 | 주요 확인 내용 |
+|---|---|---|
+| **프로젝트 홈** | [홈 대시보드 열기](https://jp.cloud.langfuse.com/project/cmvn9ym2z000bad0le09b0n4i) | 모델별 호출 건수 점유율, 일별 과금액 추이, 전반적인 통과 점수 분포 |
+| **세션 목록** | [Sessions 탭 열기](https://jp.cloud.langfuse.com/project/cmvn9ym2z000bad0le09b0n4i/sessions) | 평가 실행 단위별 종합 성적표, 총 소요 비용, 포함된 문제 목록 |
+| **트레이스 목록** | [Traces 탭 열기](https://jp.cloud.langfuse.com/project/cmvn9ym2z000bad0le09b0n4i/traces?filter=isRootObservation%3Bboolean%3B%3B%3D%3Btrue&traceTab=scores&view=graph) | 문제 1건 단위의 상세 흐름도, 단계별 입출력 프롬프트, 채점 점수 |
+| **프롬프트 보관함** | [Prompts 탭 열기](https://jp.cloud.langfuse.com/project/cmvn9ym2z000bad0le09b0n4i/prompts) | COSMOS 시스템 프롬프트 10종의 버전별 원문 템플릿과 성능 지표 |
+
+---
+
+### 5.3 세션 목록에서 평가 결과 확인하는 법
+
+1. 좌측 메뉴에서 **`Sessions`**를 클릭한다.
+2. 목록에서 확인하고자 하는 평가의 세션 ID(`eval-<run_id>`)를 클릭한다.
+3. 세션 상세 페이지에서 다음 정보를 즉시 확인할 수 있다:
+   - **`Total Cost`**: 해당 평가 전체에서 발생한 총비용 (서버리스 GPU 생성 비용 + 채점에 사용된 API 비용 합산)
+   - **`Trace Count`**: 생성된 총 문제 수 (스모크 테스트 4건 또는 정식 평가 72건)
+   - **트레이스 테이블**: 해당 평가에 속한 문제들의 목록과 각각의 통과 여부 및 소요 시간
+
+---
+
+### 5.4 트레이스 목록 탐색 및 필터링 활용법
+
+좌측 메뉴의 **`Traces`** 화면에서는 생성된 개별 문제들을 다각도로 필터링하여 분석할 수 있다.
+
+#### ① 기본 화면 구성
+- **`Name`**: 문제 식별자 (예: `eval-40290654411:v1-0012:LV2:DP`)
+- **`User`**: 실행 트랙 유형 (`base_model` 또는 `trained_model`)
+- **`Latency`**: 해당 문제 1건의 생성 및 채점 전체에 소요된 총 시간
+- **`Cost`**: 해당 문제 1건에서 발생한 비용
+- **`Scores`**: 채점 결과 배지 (`passed: 1`, `usable: 1` 등)
+
+#### ② 필수 추천 필터
+화면 상단 **`Filter`** 버튼을 눌러 다음 조건을 설정하면 분석 시간을 크게 단축할 수 있다:
+- **방금 실행한 평가만 모아보기**: `Session ID` = `eval-4029...` 입력
+- **탈락한 문제만 골라내기**: `Score` → `passed` = `0` (또는 `usable` = `0`)
+- **특정 탈락 사유만 모아보기**: `Score` → `outcome` contains `REF_CODE_FAILED` 또는 `PROBLEM_CONTRADICTION`
+- **최상위 문제 단위로만 보기**: 상단 필터에서 `Root observation only`를 활성화하여 하위 스팬들이 목록에 섞여 나오는 것을 방지
+
+---
+
+### 5.5 문제 1건 심층 디버깅 방법 (트레이스 상세 분석)
+
+트레이스 목록에서 특정 문제를 클릭하면 우측에 상세 분석 패널이 열린다.
+
+#### ① 그래프 뷰 전환
+- 우측 패널 상단에서 목록 형태의 뷰 대신 **`Graph`** 아이콘을 클릭한다.
+- 좌측 `generate` 분기와 우측 `score` 분기로 이어지는 시각적 파이프라인 그래프가 표시된다.
+
+#### ② 노드별 입출력 원문 검사
+그래프에서 특정 노드 상자를 클릭하면 해당 노드의 세부 정보가 서브 패널에 표시된다:
+- **`generate_problem` 노드 클릭 시**:
+  - `Input`: Few-shot 참고 문제 3건을 포함하여 후보 모델에 실제로 주입된 프롬프트 전문 확인
+  - `Output`: 후보 모델이 출력한 원본 문제 JSON 데이터 전문 확인
+  - `Model`: 실제 추론에 사용된 모델명 (예: `Qwen/Qwen3.5-122B-A10B-FP8`)
+  - `Usage`: `prompt_tokens`, `completion_tokens`, `total_tokens` 사용량 확인
+- **`check_contradiction` 노드 클릭 시**:
+  - 채점용 검증 모델이 문제 설명과 입출력 예시 사이에 논리 모순이 있다고 판단한 근거 텍스트 확인
+- **`generate_ref_code` 노드 클릭 시**:
+  - 생성된 문제를 풀기 위해 채점기가 작성한 정답 기준 코드 확인
+- **`semantic_validate` 노드 클릭 시**:
+  - Judge0 채점 서버에서 실행된 테스트케이스별 실제 실행 결과, 표준 출력, 컴파일 오류 메시지 확인
+
+#### ③ 점수 탭 확인 (`Scores`)
+우측 패널 상단의 **`Scores`** 탭을 누르면 해당 문제에 기록된 정량 채점 지표를 확인할 수 있다:
+- **`passed`**: `1` (최종 합격) 또는 `0` (폐기)
+- **`usable`**: `1` (실제 출제 규격 통과) 또는 `0` (비정상 시간/메모리 제한 등으로 실무 출제 불가)
+- **`outcome`**: 구체적인 탈락 단계와 코드 (예: `semantic_validate:REF_CODE_FAILED`, `check_contradiction:PROBLEM_CONTRADICTION`, `PASSED`)
+- **`Comment`**: 검증기가 남긴 탈락 사유 요약 메시지
+- **`gpu_cost_usd`**: 문제 생성에 소요된 GPU 단가 기준 과금액
+
+---
+
+### 5.6 프롬프트 보관함 및 버전 비교 (`Prompts`)
+
+좌측 메뉴의 **`Prompts`** 탭에서는 COSMOS 문제 생성 파이프라인 전반에 쓰이는 10종의 시스템 프롬프트를 확인하고 관리할 수 있다.
+
+1. 프롬프트 목록에서 `generate_problem` 등 원하는 항목을 클릭한다.
+2. 상단 버전 선택창에서 현재 버전(`v11`)과 이전 버전(`v10`, `v9` 등)을 선택해 프롬프트 변경 사항을 나란히 비교할 수 있다.
+3. 각 버전 아래에서 해당 프롬프트를 거쳐간 실제 호출 횟수, 평균 지연 시간, 평균 토큰 수 변화를 확인하여 프롬프트 개선 효과를 정량적으로 검증할 수 있다.
 
 ---
 
