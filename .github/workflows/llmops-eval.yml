@@ -189,7 +189,7 @@ jobs:
     needs: evaluate
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: staging
+    environment: production-approval
 
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

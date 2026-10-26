@@ -70,7 +70,13 @@ def get_active_model_version(
         response = ssm_client.get_parameter(Name=param_name, WithDecryption=False)
         val = response.get("Parameter", {}).get("Value")
         if val:
-            _cached_model_version = val.strip()
+            val_clean = val.strip()
+            if val_clean.upper() == "NONE":
+                logger.info(
+                    "AWS SSM Parameter Store 모델 버전이 NONE으로 설정되어 있습니다.",
+                )
+                return None
+            _cached_model_version = val_clean
             _cached_at = now
             logger.info(
                 "AWS SSM Parameter Store에서 운영 모델 버전 조회 성공: %s",

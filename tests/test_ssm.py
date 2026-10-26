@@ -63,6 +63,19 @@ def test_SSM_에러_발생_시_None을_반환한다(monkeypatch):
     assert get_active_model_version() is None
 
 
+def test_SSM_값이_NONE이면_None을_반환한다(monkeypatch):
+    clear_ssm_cache()
+
+    class NoneSSMClient:
+        def get_parameter(self, Name, WithDecryption):
+            return {"Parameter": {"Value": "NONE"}}
+
+    fake_boto3 = SimpleNamespace(client=lambda service, region_name: NoneSSMClient())
+    monkeypatch.setattr("boto3.client", fake_boto3.client)
+
+    assert get_active_model_version() is None
+
+
 def test_SSM_조회_실패_시_default_model을_반환한다(monkeypatch):
     clear_ssm_cache()
 
