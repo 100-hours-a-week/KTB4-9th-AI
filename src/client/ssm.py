@@ -50,15 +50,22 @@ def get_active_model_version(
     ):
         return _cached_model_version
 
-    param_name = os.getenv("SSM_MODEL_VERSION_PARAM", "/cosmos/prod/model_version")
     aws_region = os.getenv("AWS_REGION", "ap-northeast-2")
+    default_param = (
+        "/cosmos/dev/model_version"
+        if aws_region == "us-west-2"
+        else "/cosmos/prod/model_version"
+    )
+    param_name = os.getenv("SSM_MODEL_VERSION_PARAM", default_param)
 
     try:
         from src.core.config import get_settings
 
         settings = get_settings()
-        param_name = getattr(settings, "ssm_model_version_param", param_name)
-        aws_region = getattr(settings, "aws_region", aws_region)
+        if getattr(settings, "ssm_model_version_param", None):
+            param_name = settings.ssm_model_version_param
+        if getattr(settings, "aws_region", None):
+            aws_region = settings.aws_region
     except Exception:
         pass
 
