@@ -12,6 +12,7 @@ from langchain_core.exceptions import OutputParserException
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel, ValidationError, model_validator
 
+from src.client.langfuse import langfuse_prompt_context
 from src.core.config import get_settings
 from src.core.exception import LLMOutputParseError
 
@@ -257,19 +258,20 @@ async def call_llm_structured[T: BaseModel](
     Raises:
         LLMOutputParseError: 응답이 형식에 맞지 않거나 비어 있는 경우
     """
-    local = _local_model.get()
-    if local is not None:
-        return await call_local_structured(prompt, local, schema)
+    with langfuse_prompt_context(cfg.prompt_version):
+        local = _local_model.get()
+        if local is not None:
+            return await call_local_structured(prompt, local, schema)
 
-    structured = build_chat_model(cfg).with_structured_output(schema)
-    try:
-        result = await structured.ainvoke(prompt)
-    except (OutputParserException, ValueError) as error:
-        raise LLMOutputParseError(f"구조화 응답 해석 실패: {error}") from error
+        structured = build_chat_model(cfg).with_structured_output(schema)
+        try:
+            result = await structured.ainvoke(prompt)
+        except (OutputParserException, ValueError) as error:
+            raise LLMOutputParseError(f"구조화 응답 해석 실패: {error}") from error
 
-    if not isinstance(result, schema):
-        raise LLMOutputParseError("구조화 응답이 비어 있음")
-    return result
+        if not isinstance(result, schema):
+            raise LLMOutputParseError("구조화 응답이 비어 있음")
+        return result
 
 
 @lru_cache
@@ -277,7 +279,7 @@ def get_local_client() -> AsyncOpenAI:
     """
     로컬 모델 서버(vLLM)의 OpenAI 호환 클라이언트.
 
-    LangSmith 추적이 켜져 있으면 호출이 그래프 트레이스 아래에 기록된다.
+    LangSmith 및 Langfuse 추적이 켜져 있으면 호출이 그래프 트레이스 아래에 기록된다.
     재시도는 call_llm_with_fallback이 하므로 SDK 자체 재시도는 끈다.
 
     Raises:
@@ -287,12 +289,17 @@ def get_local_client() -> AsyncOpenAI:
     if not settings.vllm_url or not settings.vllm_api_key:
         raise RuntimeError("VLLM_URL, VLLM_API_KEY가 설정되지 않았습니다.")
 
+    from langfuse.openai import AsyncOpenAI
     from langsmith.wrappers import wrap_openai
-    from openai import AsyncOpenAI
+
+    vllm_base = settings.vllm_url.rstrip("/")
+    if not vllm_base.endswith("/v1"):
+        vllm_base = f"{vllm_base}/v1"
 
     client = AsyncOpenAI(
-        base_url=f"{settings.vllm_url.rstrip('/')}/v1",
+        base_url=vllm_base,
         api_key=settings.vllm_api_key,
+        timeout=300.0,
         max_retries=0,
     )
     return wrap_openai(client)

@@ -46,9 +46,11 @@ def get_gpu_config() -> tuple[any, int]:
     gpu_type = os.environ.get("MODAL_GPU_TYPE", "H200").upper().strip()
 
     if gpu_type == "H200":
-        return modal.gpu.H200(), 1
+        return "H200", 1
     if gpu_type == "B200":
-        return modal.gpu.B200(), 1
+        return "B200", 1
+    if gpu_type == "H100":
+        return modal.gpu.H100(), 1
     if gpu_type in ("2XA100", "2XA100-80GB", "2X_A100"):
         return modal.gpu.A100(count=2, size="80GB"), 2
     if gpu_type in ("A100", "A100-80GB"):
@@ -67,14 +69,22 @@ def get_gpu_config() -> tuple[any, int]:
 SELECTED_GPU, TENSOR_PARALLEL_SIZE = get_gpu_config()
 
 # 최신 vLLM 및 Qwen3.5 지원을 위한 transformers >= 5.0 설치
-vllm_image = modal.Image.from_registry(
-    "nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.11"
-).pip_install(
-    "vllm>=0.7.0",
-    "transformers>=5.0.0",
-    "huggingface_hub>=0.26.0",
-    "fastapi",
-    "pydantic",
+vllm_image = (
+    modal.Image.from_registry(
+        "nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.11"
+    )
+    .pip_install(
+        "vllm>=0.7.0",
+        "transformers>=5.0.0",
+        "huggingface_hub>=0.26.0",
+        "fastapi",
+        "pydantic",
+    )
+    # CUDA 12.8 환경에서 DeepGEMM NVCC 충돌 방지를 위해 비활성화 (FlashInfer 사용)
+    .env({
+        "VLLM_USE_DEEP_GEMM": "0",
+        "MODEL_ID": os.environ.get("MODEL_ID", DEFAULT_MODEL_ID),
+    })
 )
 
 
@@ -83,22 +93,28 @@ vllm_image = modal.Image.from_registry(
     # 환경 변수 MODAL_GPU_TYPE으로 동적 선택 (기본값: H200 141GB)
     gpu=SELECTED_GPU,
     volumes={CACHE_DIR: volume},
+    # 단일 GPU 컨테이너로 제한하여 중복 기동 및 비용 과다 방지
+    max_containers=1,
     # 60초 유휴 시 컨테이너를 0대로 자동 축소하여 유휴 비용 방어
     scaledown_window=60,
-    timeout=10 * MINUTES,
+    timeout=15 * MINUTES,
     secrets=[
         # MODAL_API_KEY (또는 VLLM_API_KEY) 및 HF_TOKEN 주입
         modal.Secret.from_name("cosmos-modal-secret", required_keys=[]),
     ],
 )
-@modal.web_server(port=VLLM_PORT, startup_timeout=10 * MINUTES)
+@modal.concurrent(max_inputs=32)
 class ModelServer:
     """vLLM OpenAI 호환 서버리스 인스턴스."""
 
-    @modal.enter()
-    def startup(self):
+    @modal.web_server(port=VLLM_PORT, startup_timeout=10 * MINUTES)
+    def serve(self):
         # 최신 캐싱된 가중치를 컨테이너 파일시스템에 즉시 동기화
         volume.reload()
+
+        # DeepGEMM NVCC 버전 충돌 방지 및 메모리 단편화 완화
+        os.environ["VLLM_USE_DEEP_GEMM"] = "0"
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
         model_id = os.environ.get("MODEL_ID", DEFAULT_MODEL_ID)
         api_key = (
@@ -128,27 +144,19 @@ class ModelServer:
             "0.0.0.0",
             "--tensor-parallel-size",
             str(TENSOR_PARALLEL_SIZE),
+            # few-shot 프롬프트 + 구조화 출력 여유를 위해 컨텍스트 길이를 8192로 확보
             "--max-model-len",
             "8192",
+            "--gpu-memory-utilization",
+            "0.92",
+            "--enforce-eager",
             # Qwen3.5 계열 추론 토큰(<think>) 노출을 서버 레벨에서 원천 차단
             "--default-chat-template-kwargs",
             '{"enable_thinking": false}',
             "--api-key",
             api_key,
-            "--disable-log-requests",
         ]
 
         print(f"[vLLM Server] 실행 명령어: {' '.join(cmd)}")
-        self.process = subprocess.Popen(cmd)
-
-    @modal.exit()
-    def stop(self):
-        """컨테이너 종료 시 vLLM 프로세스를 정상 정리한다."""
-        if hasattr(self, "process") and self.process:
-            print("[vLLM Server] 프로세스 종료 신호 전송...")
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-            print("[vLLM Server] 프로세스 정상 종료 완료.")
+        # @modal.web_server는 함수가 리턴되어야 포트 프록시를 개방하므로 백그라운드 기동
+        subprocess.Popen(cmd)

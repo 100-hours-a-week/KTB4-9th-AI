@@ -34,6 +34,10 @@ on:
         description: "평가할 요청 건수 (0이면 72건 전체, 스모크 테스트 시 4건 등)"
         required: false
         default: "0"
+      concurrency:
+        description: "동시에 생성할 문제 수 (H200 기준 12 권장)"
+        required: false
+        default: "12"
 
 permissions:
   contents: read
@@ -49,14 +53,44 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: cosmos
+          POSTGRES_USER: cosmos
+          POSTGRES_PASSWORD: cosmos_local_dev
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: cosmos
+      DB_PASSWORD: cosmos_local_dev
+      DB_NAME: cosmos
       LABEL: eval-${{ github.run_id }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       MODAL_GPU_TYPE: ${{ inputs.gpu_type }}
+      MODEL_ID: ${{ inputs.model_id }}
       VLLM_URL: ${{ secrets.VLLM_URL }}
       VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      JUDGE0_URL: ${{ secrets.JUDGE0_URL || 'https://stage-judge.cosmoscode.site' }}
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       LANGCHAIN_TRACING_V2: "true"
       LANGCHAIN_PROJECT: "cosmos-model-eval"
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+      LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST || secrets.LANGFUSE_BASE_URL || 'https://jp.cloud.langfuse.com' }}
+      LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL || secrets.LANGFUSE_HOST || 'https://jp.cloud.langfuse.com' }}
       MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI || 'https://mlflow.cosmoscode.site' }}
       MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
@@ -82,6 +116,55 @@ jobs:
           # MLflow 기록을 위해 mlflow 패키지 추가 설치
           uv pip install mlflow boto3
 
+      - name: 0.2단계 - 로컬 DB 마이그레이션 및 Few-shot·Langfuse 리소스 동기화
+        run: |
+          echo "=================================================="
+          echo "로컬 PostgreSQL 스키마 마이그레이션 및 시드 적재"
+          echo "=================================================="
+          uv run alembic upgrade head
+          uv run python -m src.db.seed_fewshot
+          uv run python -m src.client.langfuse_setup
+
+      - name: 0단계 - Modal 서버리스 vLLM 인스턴스 배포 및 활성화
+        run: |
+          echo "=================================================="
+          echo "Modal vLLM 서버리스 배포 시작"
+          echo "- 모델: ${{ inputs.model_id }}"
+          echo "- GPU: ${{ inputs.gpu_type }}"
+          echo "=================================================="
+          uv run --with modal modal deploy modal_serve.py
+
+      - name: 0.5단계 - vLLM 추론 엔드포인트 기동 상태 확인
+        run: |
+          echo "=================================================="
+          echo "vLLM 추론 엔드포인트 상태 확인 중..."
+          echo "=================================================="
+          BASE_ENDPOINT="${VLLM_URL%/v1}"
+          HEALTH_URL="${BASE_ENDPOINT}/v1/models"
+          echo "확인 대상 URL: ${HEALTH_URL}"
+
+          SUCCESS=0
+          for i in {1..25}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${VLLM_API_KEY}" \
+              --max-time 15 \
+              "${HEALTH_URL}" || true)
+
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "✅ vLLM 서버 준비 완료 (HTTP 200)"
+              SUCCESS=1
+              break
+            fi
+
+            echo "vLLM 서버 기동 대기 중 (시도 ${i}/25, 응답 코드: ${HTTP_CODE})... 10초 후 재시도"
+            sleep 10
+          done
+
+          if [ "${SUCCESS}" -ne 1 ]; then
+            echo "❌ vLLM 서버 기동 확인 실패 (타임아웃)"
+            exit 1
+          fi
+
       - name: 1단계 - AI 팀 평가기 실행 (evals.generate)
         run: |
           LIMIT_OPT=""
@@ -97,21 +180,30 @@ jobs:
             --label "${LABEL}" \
             --model "${{ inputs.model_id }}" \
             --chat-template-kwargs '{"enable_thinking": false}' \
+            --concurrency "${{ inputs.concurrency || '12' }}" \
             ${LIMIT_OPT}
 
       - name: 2단계 - AI 팀 평가기 채점 (evals.score)
         run: |
+          LIMIT_OPT=""
+          if [ "${{ inputs.limit }}" != "0" ]; then
+            LIMIT_OPT="--limit ${{ inputs.limit }}"
+          fi
+
           echo "=================================================="
           echo "평가 2단계 (채점 및 검증 재생) 시작"
           echo "=================================================="
-          uv run python -m evals.score --label "${LABEL}"
+          uv run python -m evals.score \
+            --label "${LABEL}" \
+            --concurrency 8 \
+            ${LIMIT_OPT}
 
       - name: 3단계 - 비교표 산출 (evals.summarize)
         run: |
           echo "=================================================="
           echo "평가 3단계 (비교표 요약) 시작"
           echo "=================================================="
-          uv run python -m evals.summarize --label "${LABEL}"
+          uv run python -m evals.summarize "${LABEL}" --out "evals/results/${LABEL}/summary.md"
 
       - name: 4단계 - MLflow 및 S3에 메트릭 기록
         continue-on-error: true
@@ -120,7 +212,8 @@ jobs:
             --label "${LABEL}" \
             --track-type "${{ inputs.track_type }}" \
             --model-id "${{ inputs.model_id }}" \
-            --prompt-version "${{ inputs.prompt_version }}"
+            --prompt-version "${{ inputs.prompt_version }}" \
+            --gpu-type "${{ inputs.gpu_type }}"
 
       - name: 평가 결과 아티팩트 보관
         uses: actions/upload-artifact@v4
@@ -141,6 +234,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: production-approval
+
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
       - name: Configure AWS credentials
@@ -165,8 +261,8 @@ jobs:
           echo "성공적으로 SSM 파라미터가 등록되었습니다. 다음 날 새벽 01:00 배치부터 자동 적용됩니다."
 
       - name: 디스코드 운영 배포 승격 알림 발송
-        if: secrets.DISCORD_WEBHOOK_URL != ''
+        if: env.DISCORD_WEBHOOK_URL != ''
         run: |
           curl -H "Content-Type: application/json" -X POST \
             -d "{\"content\": \"✅ **[LLMOps 운영 모델 승격 승인]**\n- **승인 모델**: \`${{ inputs.model_id }}\`\n- **적용 파라미터**: \`/cosmos/prod/model_version\`\n다음 새벽 01:00 KST 배치부터 이 모델로 자동 추론됩니다.\"}" \
-            "${{ secrets.DISCORD_WEBHOOK_URL }}"
+            "${DISCORD_WEBHOOK_URL}"
