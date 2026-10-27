@@ -115,7 +115,7 @@ uv run pytest
 uv run ruff check .
 ```
 
-모델 평가 하네스(`evals.generate` → `evals.score` → `evals.summarize`) 및 GitHub Actions 자동화 파이프라인의 상세 사용법은 [`docs/LLMOPS_GUIDE.md`](docs/LLMOPS_GUIDE.md)를 참고한다.
+모델 평가 하네스(`evals.generate` → `evals.score` → `evals.summarize`)
 
 ---
 
