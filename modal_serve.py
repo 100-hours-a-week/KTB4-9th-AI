@@ -92,6 +92,7 @@ vllm_image = modal.Image.from_registry(
         modal.Secret.from_name("cosmos-modal-secret", required_keys=[]),
     ],
 )
+@modal.concurrent(max_inputs=32)
 class ModelServer:
     """vLLM OpenAI 호환 서버리스 인스턴스."""
 
@@ -130,6 +131,8 @@ class ModelServer:
             str(TENSOR_PARALLEL_SIZE),
             "--max-num-seqs",
             "256",
+            "--max-model-len",
+            "8192",
             "--gpu-memory-utilization",
             "0.95",
             "--enforce-eager",
