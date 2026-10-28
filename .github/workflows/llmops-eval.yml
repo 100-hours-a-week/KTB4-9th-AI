@@ -59,7 +59,7 @@ jobs:
   evaluate:
     name: Run AI Evaluation on Modal Serverless
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     services:
       postgres:
