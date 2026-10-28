@@ -34,7 +34,7 @@ def run_main(monkeypatch, tmp_path):
         train_path = tmp_path / f"train_{seed}.jsonl"
         val_path = tmp_path / f"val_{seed}.jsonl"
 
-        monkeypatch.setattr(build_dataset, "load_problems", lambda: problems)
+        monkeypatch.setattr(build_dataset, "load_problems", lambda _path: problems)
         monkeypatch.setattr(build_dataset, "TRAIN_PATH", train_path)
         monkeypatch.setattr(build_dataset, "VAL_PATH", val_path)
         monkeypatch.setattr(build_dataset, "SEED", seed)
