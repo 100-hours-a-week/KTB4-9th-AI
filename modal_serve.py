@@ -132,6 +132,7 @@ class ModelServer:
             "256",
             "--gpu-memory-utilization",
             "0.95",
+            "--enforce-eager",
             # Qwen3.5 계열 추론 토큰(<think>) 노출을 서버 레벨에서 원천 차단
             "--default-chat-template-kwargs",
             '{"enable_thinking": false}',
