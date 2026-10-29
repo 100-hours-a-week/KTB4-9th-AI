@@ -79,7 +79,7 @@ async def convert_one(
             return None
 
 
-def pick_rows(limit: int) -> list[dict]:
+def pick_rows(limit: int, offset: int = 0) -> list[dict]:
     """변환할 원본을 고른다. 난이도와 카테고리가 고르게 섞이도록 돌아가며 뽑는다."""
     ds = load_dataset("deepmind/code_contests", split="train")
 
@@ -97,26 +97,29 @@ def pick_rows(limit: int) -> list[dict]:
 
     picked: list[dict] = []
     index = 0
-    while len(picked) < limit:
+    target = limit + offset
+    while len(picked) < target:
         added = False
         for rows in buckets.values():
             if index < len(rows):
                 picked.append(rows[index])
                 added = True
-                if len(picked) >= limit:
+                if len(picked) >= target:
                     break
         if not added:
             break
         index += 1
-    return picked
+    return picked[offset:]
 
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="외부 데이터셋을 우리 형식으로 변환")
     parser.add_argument("--limit", type=int, default=20, help="변환할 건수")
+    parser.add_argument("--offset", type=int, default=0, help="건너뛸 건수")
+    parser.add_argument("--out", type=Path, default=OUTPUT_PATH, help="출력 경로")
     args = parser.parse_args()
 
-    rows = pick_rows(args.limit)
+    rows = pick_rows(args.limit, args.offset)
     logger.info("변환 대상 %d건", len(rows))
 
     cfg = LLMConfig(model_name=MODEL_NAME)
@@ -124,12 +127,12 @@ async def main() -> None:
     results = await asyncio.gather(*(convert_one(row, cfg, semaphore) for row in rows))
 
     problems = [p for p in results if p is not None]
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with OUTPUT_PATH.open("w", encoding="utf-8") as f:
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    with args.out.open("w", encoding="utf-8") as f:
         for problem in problems:
             f.write(problem.model_dump_json() + "\n")
 
-    logger.info("변환 끝: %d/%d건 → %s", len(problems), len(rows), OUTPUT_PATH)
+    logger.info("변환 끝: %d/%d건 → %s", len(problems), len(rows), args.out)
 
 
 if __name__ == "__main__":
