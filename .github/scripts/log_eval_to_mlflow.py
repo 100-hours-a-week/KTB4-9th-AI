@@ -48,6 +48,12 @@ def parse_args():
     parser.add_argument(
         "--track-type", default="base_model", choices=["base_model", "trained_model"]
     )
+    parser.add_argument(
+        "--target-env",
+        default="dev",
+        choices=["dev", "prod"],
+        help="승격 대상 환경 (dev: 오레곤 EC2, prod: 서울 ECS)",
+    )
     parser.add_argument("--model-id", required=True, help="평가 대상 모델 식별자")
     parser.add_argument(
         "--prompt-version", default="generate_problem/v11", help="프롬프트 버전"
@@ -213,6 +219,7 @@ def main():
 
             summary_input = {
                 "track_type": args.track_type,
+                "target_env": args.target_env,
                 "model_id": args.model_id,
                 "prompt_version": args.prompt_version,
                 "gpu_type": gpu_name,
@@ -233,7 +240,7 @@ def main():
                 trace_context={"trace_id": summary_trace_id},
                 session_id=args.label,
                 trace_name=f"{args.label}:SUMMARY",
-                tags=["summary", args.track_type, gpu_name],
+                tags=["summary", args.track_type, gpu_name, args.target_env],
                 version=args.prompt_version,
                 model=args.model_id,
                 input=summary_input,
@@ -284,6 +291,7 @@ def main():
                 mlflow.log_params(
                     {
                         "track_type": args.track_type,
+                        "target_env": args.target_env,
                         "model_id": args.model_id,
                         "prompt_version": args.prompt_version,
                         "gpu_type": summary_data["gpu_type"],
@@ -365,6 +373,12 @@ def main():
             out.write("### 1. 실행 환경 및 GPU 인프라 비용\n\n")
             out.write("| 항목 | 값 |\n|---|---|\n")
             out.write(f"| **평가 모델 (`model_id`)** | `{args.model_id}` |\n")
+            target_env_desc = (
+                "Dev: 오레곤 EC2 (`us-west-2`)"
+                if args.target_env == "dev"
+                else "Prod: 서울 ECS (`ap-northeast-2`)"
+            )
+            out.write(f"| **승격 대상 환경 (`target_env`)** | {target_env_desc} |\n")
             out.write(
                 "| **트랙 유형 / 프롬프트** | "
                 f"`{args.track_type}` / `{args.prompt_version}` |\n"

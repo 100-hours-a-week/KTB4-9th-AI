@@ -3,6 +3,14 @@ name: LLMOps Evaluation & Release
 on:
   workflow_dispatch:
     inputs:
+      target_env:
+        description: "승격 대상 환경 (dev: 오레곤 EC2, prod: 서울 ECS)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
       track_type:
         description: "평가 유형 선택 (비학습 베이스 모델 vs 파인튜닝 학습 모델)"
         required: true
@@ -211,6 +219,7 @@ jobs:
           uv run python .github/scripts/log_eval_to_mlflow.py \
             --label "${LABEL}" \
             --track-type "${{ inputs.track_type }}" \
+            --target-env "${{ inputs.target_env }}" \
             --model-id "${{ inputs.model_id }}" \
             --prompt-version "${{ inputs.prompt_version }}" \
             --gpu-type "${{ inputs.gpu_type }}"
@@ -225,7 +234,7 @@ jobs:
         if: env.DISCORD_WEBHOOK_URL != ''
         run: |
           curl -H "Content-Type: application/json" -X POST \
-            -d "{\"content\": \"🚀 **[LLMOps 평가 완료]**\n- **유형**: \`${{ inputs.track_type }}\`\n- **모델**: \`${{ inputs.model_id }}\`\n- **프롬프트**: \`${{ inputs.prompt_version }}\`\n- **결과 라벨**: \`${{ env.LABEL }}\`\nGitHub Actions 요약 화면에서 승인 여부를 결정하세요: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            -d "{\"content\": \"🚀 **[LLMOps 평가 완료]**\n- **대상 환경**: \`${{ inputs.target_env }}\`\n- **유형**: \`${{ inputs.track_type }}\`\n- **모델**: \`${{ inputs.model_id }}\`\n- **프롬프트**: \`${{ inputs.prompt_version }}\`\n- **결과 라벨**: \`${{ env.LABEL }}\`\nGitHub Actions 요약 화면에서 승인 여부를 결정하세요: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
             "${DISCORD_WEBHOOK_URL}"
 
   promote-release:
@@ -239,16 +248,35 @@ jobs:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
+      - name: 대상 환경 파라미터 및 리전 설정
+        id: env-setup
+        run: |
+          if [ "${{ inputs.target_env }}" = "prod" ]; then
+            echo "param_name=/cosmos/prod/model_version" >> $GITHUB_OUTPUT
+            echo "aws_region=ap-northeast-2" >> $GITHUB_OUTPUT
+            echo "env_name=Prod (서울 ECS)" >> $GITHUB_OUTPUT
+          else
+            echo "param_name=/cosmos/dev/model_version" >> $GITHUB_OUTPUT
+            echo "aws_region=us-west-2" >> $GITHUB_OUTPUT
+            echo "env_name=Dev (오레곤 EC2)" >> $GITHUB_OUTPUT
+          fi
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_STAGE_CD_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'ap-northeast-2' }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ steps.env-setup.outputs.aws_region }}
 
       - name: AWS SSM Parameter Store 업데이트
         run: |
-          PARAM_NAME="/cosmos/prod/model_version"
+          PARAM_NAME="${{ steps.env-setup.outputs.param_name }}"
+          AWS_REGION="${{ steps.env-setup.outputs.aws_region }}"
+          ENV_NAME="${{ steps.env-setup.outputs.env_name }}"
+
           echo "=================================================="
+          echo "대상 환경: ${ENV_NAME} (${AWS_REGION})"
           echo "승인된 모델을 SSM Parameter Store에 등록합니다: ${PARAM_NAME} -> ${{ inputs.model_id }}"
           echo "=================================================="
 
@@ -256,13 +284,15 @@ jobs:
             --name "${PARAM_NAME}" \
             --value "${{ inputs.model_id }}" \
             --type "String" \
-            --overwrite
+            --overwrite \
+            --region "${AWS_REGION}" \
+            --description "Approved model for ${ENV_NAME} from GitHub Run ${{ github.run_id }}"
 
-          echo "성공적으로 SSM 파라미터가 등록되었습니다. 다음 날 새벽 01:00 배치부터 자동 적용됩니다."
+          echo "성공적으로 SSM 파라미터가 등록되었습니다 (${ENV_NAME})."
 
-      - name: 디스코드 운영 배포 승격 알림 발송
+      - name: 디스코드 배포 승격 알림 발송
         if: env.DISCORD_WEBHOOK_URL != ''
         run: |
           curl -H "Content-Type: application/json" -X POST \
-            -d "{\"content\": \"✅ **[LLMOps 운영 모델 승격 승인]**\n- **승인 모델**: \`${{ inputs.model_id }}\`\n- **적용 파라미터**: \`/cosmos/prod/model_version\`\n다음 새벽 01:00 KST 배치부터 이 모델로 자동 추론됩니다.\"}" \
+            -d "{\"content\": \"✅ **[LLMOps 모델 승격 승인 - ${{ steps.env-setup.outputs.env_name }}]**\n- **대상 환경**: \`${{ steps.env-setup.outputs.env_name }}\`\n- **승인 모델**: \`${{ inputs.model_id }}\`\n- **적용 파라미터**: \`${{ steps.env-setup.outputs.param_name }}\` (${{ steps.env-setup.outputs.aws_region }})\n${{ steps.env-setup.outputs.env_name }} 환경에서 이 모델로 자동 추론됩니다.\"}" \
             "${DISCORD_WEBHOOK_URL}"

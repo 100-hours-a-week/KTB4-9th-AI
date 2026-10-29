@@ -73,6 +73,7 @@ flowchart LR
 
 | 항목 이름 | 기본값 | 선택 및 입력 가이드 |
 |---|---|---|
+| `target_env` | `dev` | • `dev`: 오레곤 EC2 개발 환경 대상. 승인 시 `/cosmos/dev/model_version` (`us-west-2`) 갱신<br>• `prod`: 서울 ECS 운영 환경 대상. 승인 시 `/cosmos/prod/model_version` (`ap-northeast-2`) 갱신 |
 | `track_type` | `base_model` | • `base_model`: 오픈소스 원본 베이스 모델을 벤치마크할 때 선택<br>• `trained_model`: 직접 파인튜닝하여 HuggingFace에 올린 모델을 평가할 때 선택 |
 | `model_id` | `Qwen/Qwen3.5-122B-A10B-FP8` | 평가할 HuggingFace 모델 레포지토리 이름<br>예: `Qwen/Qwen3-32B`, `your-org/cosmos-qwen3-8b-merged` |
 | `prompt_version` | `generate_problem/v11` | 리포트 및 실험 기록에 표시할 프롬프트 버전 식별자 |
@@ -242,10 +243,12 @@ Langfuse의 데이터는 다음과 같은 3단계 계층 구조로 체계화되�
 ### 7.1 운영 배포 승격 절차
 
 1. 모델 평가 워크플로가 끝나면 성적표와 함께 디스코드로 평가 완료 및 배포 승인 요청 알림이 전송된다.
-2. GitHub Actions 실행 페이지 상단의 노란색 안내 배너에서 **`Review deployments`** 버튼을 누른다.
-3. `production-approval` 항목을 선택하고 코멘트를 입력한 뒤 **`Approve and deploy`**를 클릭한다.
-4. 승인이 완료되면 AWS 파라미터 저장소의 운영 모델 설정이 해당 모델로 즉시 변경된다.
-5. 운영 백엔드는 매일 새벽 정기 문제 생성 시 변경된 최신 모델을 자동으로 읽어와 출제한다.
+2. GitHub Actions 실행 페이지 상단의 안내 배너에서 **`Review deployments`** 버튼을 누른다.
+3. 승인 항목을 선택하고 코멘트를 입력한 뒤 **`Approve and deploy`**를 클릭한다.
+4. 승인이 완료되면 워크플로 실행 시 선택한 `target_env`에 따라 대상 리전의 AWS 파라미터 저장소 설정이 즉시 변경된다:
+   - **`dev` 선택 시**: 오레곤(`us-west-2`) 리전의 `/cosmos/dev/model_version` 갱신 (Dev EC2에 반영)
+   - **`prod` 선택 시**: 서울(`ap-northeast-2`) 리전의 `/cosmos/prod/model_version` 갱신 (Prod ECS에 반영)
+5. 해당 환경의 백엔드는 매일 새벽 정기 문제 생성 시 변경된 최신 모델을 자동으로 읽어와 출제한다.
 
 ### 7.2 안전장치 및 긴급 복구
 

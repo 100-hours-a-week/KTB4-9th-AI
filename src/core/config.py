@@ -80,6 +80,10 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
+    # AWS SSM Parameter Store 모델 버전 설정 (Dev: us-west-2, Prod: ap-northeast-2)
+    ssm_model_version_param: str | None = None
+    aws_region: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
