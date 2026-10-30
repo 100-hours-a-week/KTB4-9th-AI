@@ -1,4 +1,4 @@
-# :milky_way: COSMOS AI Server 
+# 🌠 COSMOS AI Server 
 
 개인화 알고리즘 학습 서비스 [COSMOS](https://cosmoscode.site)의 AI 서버다.
 코딩 테스트 문제를 생성하고, 실제로 풀리는 문제인지 코드 실행으로 검증한 뒤 백엔드(Spring)에 전달한다.
