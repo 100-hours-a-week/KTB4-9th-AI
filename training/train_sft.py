@@ -14,15 +14,36 @@ train.jsonl, val.jsonl만 있으면 된다.
         --output /workspace/runs/27b-v1
 """
 
+import unsloth  # noqa: F401  transformers보다 먼저 import해야 패치가 적용된다
+
+# isort: split
 import argparse
+import hashlib
 import json
 import logging
+import math
+import statistics
+from collections import Counter
 from pathlib import Path
 
+import torch
+from datasets import Dataset
 from huggingface_hub import snapshot_download
+from unsloth import FastLanguageModel
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+# unsloth가 import될 때 로깅을 먼저 설정해 두므로 force로 덮어써야 INFO가 나온다
+logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
 logger = logging.getLogger(__name__)
+
+# Qwen3.5의 Linear 모듈 이름 (2B 스모크에서 확인)
+TARGET_MODULES = [
+    "q_proj", "k_proj", "v_proj", "o_proj",  # full attention (4번째 레이어마다)
+    "in_proj_qkv", "in_proj_z", "out_proj",  # 선형 어텐션 (GatedDeltaNet)
+    "gate_proj", "up_proj", "down_proj",  # MLP (모든 레이어)
+]  # fmt: skip
+# in_proj_a, in_proj_b는 출력이 16차원인 게이트라 rank 16 LoRA가 의미 없어 뺐다
+
+IGNORE_INDEX = -100  # loss 계산에서 빠지는 label 값
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,10 +112,202 @@ def resolve_snapshot(model: str) -> Path:
     return path
 
 
+def load_model(snapshot: Path, max_seq_length: int):
+    """
+    bf16으로 로드한다. Qwen3.5는 멀티모달이라 토크나이저 대신 processor가 온다.
+
+    Returns:
+        tuple: (model, processor, tokenizer). tokenizer는 processor 안의
+            텍스트 토크나이저로, chat template과 토큰화에 쓴다.
+            processor는 어댑터와 같이 저장해 서빙에서 쓴다.
+    """
+    model, processor = FastLanguageModel.from_pretrained(
+        model_name=str(snapshot),
+        max_seq_length=max_seq_length,
+        load_in_4bit=False,
+        load_in_16bit=True,
+        full_finetuning=False,
+    )
+    tokenizer = getattr(processor, "tokenizer", processor)
+    if tokenizer.pad_token_id is None:
+        raise ValueError("pad 토큰이 없어 배치 패딩을 할 수 없습니다.")
+
+    logger.info(
+        "로드: %s | %s | %s | %s",
+        type(model).__name__,
+        type(processor).__name__,
+        type(tokenizer).__name__,
+        model.dtype,
+    )
+    logger.info(
+        "eos %r | pad %r | VRAM %.1fGB",
+        tokenizer.eos_token,
+        tokenizer.pad_token,
+        torch.cuda.memory_allocated() / 1024**3,
+    )
+    return model, processor, tokenizer
+
+
+def add_lora(model, rank: int, alpha: int, max_seq_length: int, seed: int):
+    """
+    LoRA를 붙이고 붙은 위치를 확인한다.
+
+    PEFT는 모듈 이름의 끝부분으로 대상을 찾으므로, 비전 인코더에 같은 이름이
+    있으면 거기에도 붙을 수 있다. 목록 중 한 곳도 안 붙은 모듈은 이름이 다른
+    모델이라는 뜻이다. 둘 다 학습을 시작하기 전에 멈춘다.
+
+    Raises:
+        RuntimeError: 비전 인코더에 붙었거나 붙지 않은 대상 모듈이 있는 경우
+    """
+    model = FastLanguageModel.get_peft_model(
+        model,
+        r=rank,
+        lora_alpha=alpha,
+        lora_dropout=0,
+        bias="none",
+        target_modules=TARGET_MODULES,
+        use_gradient_checkpointing="unsloth",
+        random_state=seed,
+        max_seq_length=max_seq_length,
+    )
+
+    counts: Counter[tuple[str, str]] = Counter()
+    for name, module in model.named_modules():
+        if getattr(module, "lora_A", None):
+            part = "vision" if "visual" in name else "language"
+            counts[(part, name.rsplit(".", 1)[-1])] += 1
+    for (part, kind), count in sorted(counts.items()):
+        logger.info("LoRA %-8s %-12s %d", part, kind, count)
+
+    if any(part == "vision" for part, _ in counts):
+        raise RuntimeError("비전 인코더에 LoRA가 붙었습니다. 대상 모듈을 좁히세요.")
+    missing = set(TARGET_MODULES) - {kind for _, kind in counts}
+    if missing:
+        raise RuntimeError(f"LoRA가 붙지 않은 대상 모듈: {sorted(missing)}")
+
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    logger.info(
+        "학습 파라미터 %s / %s (%.2f%%)",
+        f"{trainable:,}",
+        f"{total:,}",
+        trainable / total * 100,
+    )
+    return model
+
+
+def to_features(messages: list[dict], tokenizer) -> dict:
+    """
+    대화 하나를 학습 샘플로 만든다. 정답(assistant) 토큰만 loss에 들어간다.
+
+    프롬프트는 서빙과 같은 모양(add_generation_prompt=True)으로 만들고
+    그 토큰 수만큼 labels를 IGNORE_INDEX로 가린다. 이 방식은 프롬프트 토큰이
+    전체 토큰의 앞부분과 정확히 같아야 맞으므로 확인한다.
+
+    Raises:
+        ValueError: [user, assistant] 대화가 아니거나 토큰 경계가 어긋난 경우
+    """
+    roles = [message["role"] for message in messages]
+    if roles != ["user", "assistant"]:
+        raise ValueError(f"[user, assistant] 대화가 아닙니다: {roles}")
+
+    full_text = tokenizer.apply_chat_template(messages, tokenize=False)
+    prompt_text = tokenizer.apply_chat_template(
+        messages[:1], tokenize=False, add_generation_prompt=True
+    )
+    full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
+    prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
+    if full_ids[: len(prompt_ids)] != prompt_ids:
+        raise ValueError("프롬프트 토큰이 전체 토큰의 앞부분과 다릅니다.")
+
+    labels = [IGNORE_INDEX] * len(prompt_ids) + full_ids[len(prompt_ids) :]
+    return {
+        "input_ids": full_ids,
+        "attention_mask": [1] * len(full_ids),
+        "labels": labels,
+    }
+
+
+def percentile(values: list[int], q: float) -> int:
+    """정렬했을 때 q 위치의 값. q=0.95면 p95."""
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(len(ordered) * q) - 1)]
+
+
+def build_dataset(path: Path, tokenizer, max_seq_length: int):
+    """
+    jsonl을 학습 샘플 Dataset으로 만들고, 실행 기록에 남길 정보를 같이 돌려준다.
+
+    긴 샘플을 조용히 자르면 정답 끝(<|im_end|>)이 빠져 멈추는 법을 못 배우므로
+    max_seq_length를 넘는 샘플이 있으면 멈춘다.
+
+    Raises:
+        ValueError: max_seq_length보다 긴 샘플이 있는 경우
+    """
+    raw = path.read_bytes()
+    rows = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line]
+    features = [to_features(row["messages"], tokenizer) for row in rows]
+
+    total = [len(feature["input_ids"]) for feature in features]
+    answer = [
+        sum(label != IGNORE_INDEX for label in feature["labels"])
+        for feature in features
+    ]
+    info = {
+        "path": str(path),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "count": len(rows),
+        "total_tokens": {
+            "p50": statistics.median(total),
+            "p95": percentile(total, 0.95),
+            "max": max(total),
+        },
+        "answer_tokens": {
+            "p50": statistics.median(answer),
+            "p95": percentile(answer, 0.95),
+            "max": max(answer),
+        },
+    }
+    logger.info(
+        "데이터 %s: %d건 | 전체 토큰 %s | 정답 토큰 %s",
+        path.name,
+        info["count"],
+        info["total_tokens"],
+        info["answer_tokens"],
+    )
+    if info["total_tokens"]["max"] > max_seq_length:
+        raise ValueError(
+            f"{path.name}의 가장 긴 샘플({info['total_tokens']['max']}토큰)이 "
+            f"max_seq_length({max_seq_length})를 넘습니다."
+        )
+    return Dataset.from_list(features), info
+
+
+def log_boundary(dataset: Dataset, tokenizer) -> None:
+    """첫 샘플에서 가려지는 끝과 학습이 시작되는 곳을 보여준다."""
+    sample = dataset[0]
+    start = next(i for i, label in enumerate(sample["labels"]) if label != IGNORE_INDEX)
+    logger.info(
+        "가려지는 끝 %r | 학습 시작 %r | 학습 끝 %r",
+        tokenizer.decode(sample["input_ids"][start - 8 : start]),
+        tokenizer.decode(sample["labels"][start : start + 8]),
+        tokenizer.decode(sample["labels"][-3:]),
+    )
+
+
 def main() -> None:
     args = parse_args()
     snapshot = resolve_snapshot(args.model)
     logger.info("모델 %s → %s", args.model, snapshot)
+
+    model, processor, tokenizer = load_model(snapshot, args.max_seq_length)
+    model = add_lora(model, args.rank, args.alpha, args.max_seq_length, args.seed)
+
+    train_dataset, train_info = build_dataset(
+        args.train, tokenizer, args.max_seq_length
+    )
+    val_dataset, val_info = build_dataset(args.val, tokenizer, args.max_seq_length)
+    log_boundary(train_dataset, tokenizer)
 
 
 if __name__ == "__main__":
