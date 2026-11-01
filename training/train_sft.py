@@ -383,9 +383,13 @@ def train(
     return trainer, result
 
 
-def save_adapter(model, processor, output: Path) -> Path:
+def save_adapter(model, processor, output: Path, snapshot: Path, model_id: str) -> Path:
     """
     LoRA 어댑터와 processor를 저장한다. vLLM --lora-modules에 이 폴더를 넘긴다.
+
+    스냅샷 폴더로 로드했으므로 PEFT가 베이스 모델을 그 로컬 경로로 적는다.
+    HF Hub는 README의 base_model이 경로면 업로드를 거절하고, 다른 사람은
+    그 경로가 없으므로 HF ID로 바꿔 둔다.
 
     Returns:
         Path: 어댑터 폴더
@@ -393,6 +397,12 @@ def save_adapter(model, processor, output: Path) -> Path:
     adapter_dir = output / "adapter"
     model.save_pretrained(adapter_dir)
     processor.save_pretrained(adapter_dir)
+
+    for name in ("adapter_config.json", "README.md"):
+        path = adapter_dir / name
+        if path.exists():
+            text = path.read_text(encoding="utf-8")
+            path.write_text(text.replace(str(snapshot), model_id), encoding="utf-8")
 
     size = sum(f.stat().st_size for f in adapter_dir.iterdir() if f.is_file())
     logger.info("어댑터 저장: %s (%.2fGB)", adapter_dir, size / 1024**3)
@@ -538,7 +548,7 @@ def main() -> None:
 
     trainer, result = train(model, tokenizer, train_dataset, val_dataset, args)
 
-    save_adapter(model, processor, args.output)
+    save_adapter(model, processor, args.output, snapshot, args.model)
     run_config = args.output / "run_config.json"
     write_run_config(
         run_config,
