@@ -24,6 +24,7 @@ import json
 import logging
 import math
 import os
+import shutil
 import statistics
 import time
 from collections import Counter
@@ -34,6 +35,7 @@ from pathlib import Path
 import torch
 from datasets import Dataset
 from huggingface_hub import snapshot_download
+from safetensors import safe_open
 from transformers import DataCollatorForSeq2Seq, Trainer, TrainingArguments
 from unsloth import FastLanguageModel
 
@@ -425,6 +427,75 @@ def write_run_config(
     logger.info("실행 기록: %s", path)
 
 
+def weight_keys(directory: Path) -> set[str]:
+    """폴더의 safetensors 가중치 이름. 헤더만 읽으므로 큰 모델도 빠르다."""
+    keys: set[str] = set()
+    for path in directory.glob("*.safetensors"):
+        with safe_open(path, "pt") as f:
+            keys.update(f.keys())
+    return keys
+
+
+def merge(model, processor, snapshot: Path, merge_dir: Path) -> dict:
+    """
+    LoRA를 베이스에 더한 bf16 모델을 저장한다.
+
+    unsloth는 베이스 가중치를 merge_dir로 통째로 복사한 뒤 LoRA를 더한다.
+    그래서 베이스 크기만큼 빈 공간이 있어야 한다. bf16 반올림으로 작은 LoRA
+    변화량 일부가 사라지므로 평가에는 어댑터 서빙이 더 정확하다.
+
+    Returns:
+        dict: 실행 기록에 남길 병합 정보
+
+    Raises:
+        RuntimeError: 공간이 모자라거나 병합 결과가 베이스와 모양이 다른 경우
+    """
+    # 스냅샷 파일은 blob을 가리키는 링크라 stat이 실제 크기를 준다
+    needed = sum(path.stat().st_size for path in snapshot.glob("*.safetensors"))
+    merge_dir.parent.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(merge_dir.parent).free
+    logger.info(
+        "병합 → %s | 필요 %.0fGB | 남은 공간 %.0fGB",
+        merge_dir,
+        needed / 1024**3,
+        free / 1024**3,
+    )
+    if free < needed:
+        raise RuntimeError("병합할 공간이 모자랍니다. --merge-dir를 바꾸세요.")
+
+    started = time.time()
+    model.save_pretrained_merged(str(merge_dir), processor, save_method="merged_16bit")
+
+    # 베이스의 샘플링 기본값과 eos 목록을 유지한다. 병합은 새로 만들어 쓰기 때문이다
+    base_generation = snapshot / "generation_config.json"
+    if base_generation.exists():
+        shutil.copy2(base_generation, merge_dir / "generation_config.json")
+
+    base_keys, merged_keys = weight_keys(snapshot), weight_keys(merge_dir)
+    if merged_keys != base_keys:
+        raise RuntimeError(
+            "병합 가중치가 베이스와 다릅니다. "
+            f"베이스에만: {sorted(base_keys - merged_keys)[:5]} "
+            f"병합에만: {sorted(merged_keys - base_keys)[:5]}"
+        )
+
+    info = {
+        "dir": str(merge_dir),
+        "seconds": round(time.time() - started),
+        "weights": len(merged_keys),
+        "generation_config_from_base": base_generation.exists(),
+    }
+    logger.info("병합 끝: %s", info)
+    return info
+
+
+def add_to_run_config(path: Path, key: str, value: dict) -> None:
+    """이미 쓴 실행 기록에 항목 하나를 더한다."""
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config[key] = value
+    path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def check_report_to(report_to: str) -> None:
     """
     wandb에 보낼 준비가 됐는지 모델을 올리기 전에 확인한다.
@@ -458,14 +529,22 @@ def main() -> None:
     trainer, result = train(model, tokenizer, train_dataset, val_dataset, args)
 
     save_adapter(model, processor, args.output)
+    run_config = args.output / "run_config.json"
     write_run_config(
-        args.output / "run_config.json",
+        run_config,
         args,
         snapshot,
         {"train": train_info, "val": val_info},
         result,
         trainer.state.log_history,
     )
+
+    # 병합이 실패해도 학습 결과(어댑터와 기록)는 이미 남아 있다
+    if args.merge:
+        merge_dir = args.merge_dir or args.output / "merged"
+        add_to_run_config(
+            run_config, "merge", merge(model, processor, snapshot, merge_dir)
+        )
 
 
 if __name__ == "__main__":
