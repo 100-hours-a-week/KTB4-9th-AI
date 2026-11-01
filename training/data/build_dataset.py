@@ -28,6 +28,9 @@ FEW_SHOT_COUNT = 1
 VAL_RATIO = 0.1
 SEED = 42
 
+# convert.py가 붙이는 원본 이름. 정답 JSON에 들어가면 안 된다
+SOURCE_NAME_KEY = "source_name"
+
 # few-shot으로 넘길 때 쓰는 필드. render_few_shot이 이 네 개만 읽는다.
 FEW_SHOT_FIELDS = (
     "problem_title",
@@ -38,9 +41,12 @@ FEW_SHOT_FIELDS = (
 
 
 def load_problems(path: Path) -> list[dict]:
-    """변환 결과를 읽는다."""
+    """변환 결과를 읽는다. 모델이 따라 쓰지 않도록 원본 이름은 뺀다."""
     lines = path.read_text(encoding="utf-8").strip().split("\n")
-    return [json.loads(line) for line in lines]
+    problems = [json.loads(line) for line in lines]
+    for problem in problems:
+        problem.pop(SOURCE_NAME_KEY, None)
+    return problems
 
 
 def group_by_key(problems: list[dict]) -> dict[tuple, list[dict]]:
