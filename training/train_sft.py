@@ -27,6 +27,8 @@ import os
 import statistics
 import time
 from collections import Counter
+from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 
 import torch
@@ -370,6 +372,59 @@ def train(
     return trainer, result
 
 
+def save_adapter(model, processor, output: Path) -> Path:
+    """
+    LoRA 어댑터와 processor를 저장한다. vLLM --lora-modules에 이 폴더를 넘긴다.
+
+    Returns:
+        Path: 어댑터 폴더
+    """
+    adapter_dir = output / "adapter"
+    model.save_pretrained(adapter_dir)
+    processor.save_pretrained(adapter_dir)
+
+    size = sum(f.stat().st_size for f in adapter_dir.iterdir() if f.is_file())
+    logger.info("어댑터 저장: %s (%.2fGB)", adapter_dir, size / 1024**3)
+    return adapter_dir
+
+
+def package_versions() -> dict[str, str]:
+    """결과를 재현할 때 필요한 주요 패키지 버전."""
+    names = ["torch", "transformers", "trl", "peft", "unsloth", "unsloth_zoo"]
+    return {name: version(name) for name in names}
+
+
+def write_run_config(
+    path: Path,
+    args: argparse.Namespace,
+    snapshot: Path,
+    data: dict,
+    result: dict,
+    log_history: list[dict],
+) -> None:
+    """
+    이 실행을 나중에 비교·재현할 수 있도록 설정과 결과를 한 파일에 남긴다.
+
+    어댑터를 저장한 뒤에 부른다. 저장에 실패한 실행이 성공처럼 기록되지 않게 한다.
+    """
+    config = {
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "args": {
+            key: str(value) if isinstance(value, Path) else value
+            for key, value in vars(args).items()
+        },
+        "model": {"id": args.model, "snapshot": str(snapshot)},
+        "target_modules": TARGET_MODULES,
+        "gpu": torch.cuda.get_device_name(0),
+        "versions": {**package_versions(), "cuda": torch.version.cuda},
+        "data": data,
+        "result": result,
+        "log_history": log_history,  # 스텝별 loss, 학습률, 에폭별 검증 loss
+    }
+    path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("실행 기록: %s", path)
+
+
 def check_report_to(report_to: str) -> None:
     """
     wandb에 보낼 준비가 됐는지 모델을 올리기 전에 확인한다.
@@ -401,6 +456,16 @@ def main() -> None:
     log_boundary(train_dataset, tokenizer)
 
     trainer, result = train(model, tokenizer, train_dataset, val_dataset, args)
+
+    save_adapter(model, processor, args.output)
+    write_run_config(
+        args.output / "run_config.json",
+        args,
+        snapshot,
+        {"train": train_info, "val": val_info},
+        result,
+        trainer.state.log_history,
+    )
 
 
 if __name__ == "__main__":
