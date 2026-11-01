@@ -19,16 +19,20 @@ import unsloth  # noqa: F401  transformers보다 먼저 import해야 패치가 �
 # isort: split
 import argparse
 import hashlib
+import importlib.util
 import json
 import logging
 import math
+import os
 import statistics
+import time
 from collections import Counter
 from pathlib import Path
 
 import torch
 from datasets import Dataset
 from huggingface_hub import snapshot_download
+from transformers import DataCollatorForSeq2Seq, Trainer, TrainingArguments
 from unsloth import FastLanguageModel
 
 # unsloth가 import될 때 로깅을 먼저 설정해 두므로 force로 덮어써야 INFO가 나온다
@@ -74,6 +78,12 @@ def parse_args() -> argparse.Namespace:
     train.add_argument("--seed", type=int, default=42)
     train.add_argument(
         "--resume", action="store_true", help="output의 마지막 체크포인트부터 이어서"
+    )
+    train.add_argument(
+        "--report-to",
+        choices=["none", "wandb"],
+        default="none",
+        help="학습 기록을 보낼 곳. wandb는 WANDB_API_KEY와 wandb 패키지가 필요하다",
     )
 
     merge = parser.add_argument_group("병합")
@@ -295,8 +305,89 @@ def log_boundary(dataset: Dataset, tokenizer) -> None:
     )
 
 
+def train(
+    model,
+    tokenizer,
+    train_dataset: Dataset,
+    val_dataset: Dataset,
+    args: argparse.Namespace,
+) -> tuple[Trainer, dict]:
+    """
+    학습하고 검증 loss를 잰다. 에폭마다 검증하고 체크포인트를 남긴다.
+
+    Returns:
+        tuple: (trainer, 결과). 결과는 시간, 스텝, loss, 최대 VRAM으로
+            실행 기록에 남긴다.
+    """
+    training_args = TrainingArguments(
+        output_dir=str(args.output / "checkpoints"),
+        num_train_epochs=args.epochs,
+        max_steps=args.max_steps,  # 양수면 에폭 대신 이 스텝만 돈다
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.grad_accum,
+        learning_rate=args.lr,
+        # v5에는 warmup_ratio가 없다. 1 미만 실수를 주면 비율로 쓴다
+        warmup_steps=args.warmup,
+        lr_scheduler_type="linear",
+        optim="adamw_8bit",
+        bf16=True,
+        logging_steps=1,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        report_to=args.report_to,
+        run_name=args.output.name,  # wandb에서 실행을 구분하는 이름
+        seed=args.seed,
+    )
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+        # 배치 안에서 길이를 맞출 때 labels는 IGNORE_INDEX로 채운다
+        data_collator=DataCollatorForSeq2Seq(
+            tokenizer, padding=True, label_pad_token_id=IGNORE_INDEX
+        ),
+    )
+
+    torch.cuda.reset_peak_memory_stats()
+    started = time.time()
+    # --resume이면 output/checkpoints의 마지막 체크포인트부터 이어서 학습한다
+    trainer.train(resume_from_checkpoint=True if args.resume else None)
+    elapsed = time.time() - started
+
+    # 스모크(max_steps)는 에폭이 끝나지 않아 자동 검증이 돌지 않으므로 끝에서 잰다
+    eval_loss = trainer.evaluate()["eval_loss"]
+    train_losses = [log["loss"] for log in trainer.state.log_history if "loss" in log]
+    result = {
+        "seconds": round(elapsed),
+        "steps": trainer.state.global_step,
+        "final_train_loss": train_losses[-1] if train_losses else None,
+        "eval_loss": eval_loss,
+        "peak_vram_gb": round(torch.cuda.max_memory_allocated() / 1024**3, 1),
+    }
+    logger.info("학습 끝: %s", result)
+    return trainer, result
+
+
+def check_report_to(report_to: str) -> None:
+    """
+    wandb에 보낼 준비가 됐는지 모델을 올리기 전에 확인한다.
+
+    Raises:
+        RuntimeError: wandb 패키지나 WANDB_API_KEY가 없는 경우
+    """
+    if report_to != "wandb":
+        return
+    if importlib.util.find_spec("wandb") is None:
+        raise RuntimeError("wandb 패키지가 없습니다. uv pip install wandb")
+    if not os.environ.get("WANDB_API_KEY"):
+        raise RuntimeError("WANDB_API_KEY 환경변수가 없습니다.")
+
+
 def main() -> None:
     args = parse_args()
+    check_report_to(args.report_to)
     snapshot = resolve_snapshot(args.model)
     logger.info("모델 %s → %s", args.model, snapshot)
 
@@ -308,6 +399,8 @@ def main() -> None:
     )
     val_dataset, val_info = build_dataset(args.val, tokenizer, args.max_seq_length)
     log_boundary(train_dataset, tokenizer)
+
+    trainer, result = train(model, tokenizer, train_dataset, val_dataset, args)
 
 
 if __name__ == "__main__":
