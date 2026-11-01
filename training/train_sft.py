@@ -53,6 +53,10 @@ TARGET_MODULES = [
 
 IGNORE_INDEX = -100  # loss 계산에서 빠지는 label 값
 
+# 서빙(평가, 배치)과 같은 프롬프트 모양으로 학습한다. 모델마다 템플릿 기본값이
+# 달라서(2B는 thinking off, 27B는 on) 명시한다. 서빙에도 같은 값을 준다
+CHAT_TEMPLATE_KWARGS = {"enable_thinking": False}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Qwen3.5 LoRA 학습")
@@ -225,14 +229,19 @@ def to_features(messages: list[dict], tokenizer) -> dict:
     if roles != ["user", "assistant"]:
         raise ValueError(f"[user, assistant] 대화가 아닙니다: {roles}")
 
-    full_text = tokenizer.apply_chat_template(messages, tokenize=False)
+    full_text = tokenizer.apply_chat_template(
+        messages, tokenize=False, **CHAT_TEMPLATE_KWARGS
+    )
     prompt_text = tokenizer.apply_chat_template(
-        messages[:1], tokenize=False, add_generation_prompt=True
+        messages[:1], tokenize=False, add_generation_prompt=True, **CHAT_TEMPLATE_KWARGS
     )
     full_ids = tokenizer(full_text, add_special_tokens=False)["input_ids"]
     prompt_ids = tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
     if full_ids[: len(prompt_ids)] != prompt_ids:
-        raise ValueError("프롬프트 토큰이 전체 토큰의 앞부분과 다릅니다.")
+        raise ValueError(
+            "프롬프트 토큰이 전체 토큰의 앞부분과 다릅니다. "
+            f"프롬프트 끝 {prompt_text[-60:]!r}"
+        )
 
     labels = [IGNORE_INDEX] * len(prompt_ids) + full_ids[len(prompt_ids) :]
     return {
@@ -417,6 +426,7 @@ def write_run_config(
         },
         "model": {"id": args.model, "snapshot": str(snapshot)},
         "target_modules": TARGET_MODULES,
+        "chat_template_kwargs": CHAT_TEMPLATE_KWARGS,
         "gpu": torch.cuda.get_device_name(0),
         "versions": {**package_versions(), "cuda": torch.version.cuda},
         "data": data,
