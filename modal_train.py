@@ -57,12 +57,58 @@ train_image = (
 )
 
 
-def _prepare_fallback_dataset_if_needed(work_dir: Path) -> tuple[Path, Path]:
-    """train.jsonl, val.jsonl이 없으면 fewshot_seeds.jsonl을 변환해 생성한다."""
+def _prepare_fallback_dataset_if_needed(
+    work_dir: Path,
+    dataset_source: str = "/workspace/data",
+    hf_token: str | None = None,
+) -> tuple[Path, Path]:
+    """지정된 데이터 소스를 우선 탐색하고 없으면 시드에서 생성한다."""
+    src = (dataset_source or "").strip()
+
+    # 1. Hugging Face 데이터셋/모델 레포지토리 지정 시 (예: hf:org/cosmos-data-v2)
+    if src.startswith("hf:"):
+        hf_repo = src[3:].strip()
+        from huggingface_hub import hf_hub_download
+
+        dl_dir = work_dir / "training/data/hf_downloaded"
+        dl_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[Modal-Train] HF Hub에서 학습 데이터 다운로드: {hf_repo}")
+        for rtype in ("dataset", "model"):
+            try:
+                t_file = hf_hub_download(
+                    repo_id=hf_repo,
+                    filename="train.jsonl",
+                    repo_type=rtype,
+                    token=hf_token,
+                )
+                v_file = hf_hub_download(
+                    repo_id=hf_repo,
+                    filename="val.jsonl",
+                    repo_type=rtype,
+                    token=hf_token,
+                )
+                return Path(t_file), Path(v_file)
+            except Exception:
+                continue
+        raise FileNotFoundError(
+            f"HF Hub({hf_repo})에서 train.jsonl/val.jsonl을 찾을 수 없습니다."
+        )
+
+    # 2. 지정된 디렉터리 또는 볼륨/로컬 경로에 기존 파일이 있으면 최우선 사용
+    candidate_dirs = [
+        Path(src) if src else work_dir / "training/data",
+        Path(CACHE_DIR) / "data",
+        work_dir / "training/data",
+    ]
+    for cand in candidate_dirs:
+        t_cand = cand / "train.jsonl"
+        v_cand = cand / "val.jsonl"
+        if t_cand.exists() and v_cand.exists():
+            print(f"[Modal-Train] 기존 학습 데이터셋 사용: {cand}")
+            return t_cand, v_cand
+
     train_path = work_dir / "training/data/train.jsonl"
     val_path = work_dir / "training/data/val.jsonl"
-    if train_path.exists() and val_path.exists():
-        return train_path, val_path
 
     converted_path = work_dir / "training/data/converted.jsonl"
     seeds_path = work_dir / "sql/fewshot_seeds.jsonl"
@@ -137,6 +183,7 @@ def run_sft_on_modal(
     max_steps: int = -1,
     merge: bool = False,
     hf_repo_id: str = "",
+    dataset_source: str = "/workspace/data",
 ) -> dict:
     """Modal GPU에서 스냅샷 준비 후 training/train_sft.py를 실행한다."""
     from huggingface_hub import HfApi, snapshot_download
@@ -154,7 +201,9 @@ def run_sft_on_modal(
     volume.commit()
 
     work_dir = Path("/workspace")
-    train_jsonl, val_jsonl = _prepare_fallback_dataset_if_needed(work_dir)
+    train_jsonl, val_jsonl = _prepare_fallback_dataset_if_needed(
+        work_dir, dataset_source=dataset_source, hf_token=hf_token
+    )
     output_dir = Path(RUNS_DIR) / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -235,6 +284,7 @@ def main(
     max_steps: int = -1,
     merge: bool = False,
     hf_repo_id: str = "",
+    dataset_source: str = "/workspace/data",
     local_out_dir: str = "training/runs",
 ):
     run_config = run_sft_on_modal.remote(
@@ -250,6 +300,7 @@ def main(
         max_steps=max_steps,
         merge=merge,
         hf_repo_id=hf_repo_id,
+        dataset_source=dataset_source,
     )
     out_dir = Path(local_out_dir) / run_name
     out_dir.mkdir(parents=True, exist_ok=True)

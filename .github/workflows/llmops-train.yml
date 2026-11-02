@@ -35,6 +35,10 @@ on:
         description: "학습 실행 식별 이름 (/workspace/runs/<run_name>)"
         required: true
         default: "27b-v1"
+      dataset_source:
+        description: "학습 데이터 경로 또는 HF 레포 (예: /workspace/data, /workspace/data/v3, hf:org/dataset-v3)"
+        required: false
+        default: "/workspace/data"
       hf_repo_id:
         description: "어댑터를 업로드할 Hugging Face 레포지토리 ID (예: org/qwen3.5-27b-lora-v1, 비우면 생략)"
         required: false
@@ -163,10 +167,31 @@ jobs:
           # 모델 스냅샷이 캐시에 없으면 사전 다운로드
           \${PYTHON_BIN} -c "from huggingface_hub import snapshot_download; snapshot_download('${{ inputs.base_model }}')"
 
+          DATA_SRC="${{ inputs.dataset_source || '/workspace/data' }}"
+          if [[ "\${DATA_SRC}" == hf:* ]]; then
+            HF_DATA_REPO="\${DATA_SRC#hf:}"
+            DATA_DIR="/workspace/data/\${HF_DATA_REPO//\//_}"
+            mkdir -p "\${DATA_DIR}"
+            \${PYTHON_BIN} -c "
+          from huggingface_hub import hf_hub_download
+          import shutil
+          for fname in ('train.jsonl', 'val.jsonl'):
+              for rtype in ('dataset', 'model'):
+                  try:
+                      p = hf_hub_download(repo_id='\${HF_DATA_REPO}', filename=fname, repo_type=rtype)
+                      shutil.copyfile(p, '\${DATA_DIR}/' + fname)
+                      break
+                  except Exception:
+                      pass
+          "
+          else
+            DATA_DIR="\${DATA_SRC%/}"
+          fi
+
           HF_HUB_OFFLINE=1 \${PYTHON_BIN} /workspace/train_sft.py \
             --model "${{ inputs.base_model }}" \
-            --train /workspace/data/train.jsonl \
-            --val /workspace/data/val.jsonl \
+            --train "\${DATA_DIR}/train.jsonl" \
+            --val "\${DATA_DIR}/val.jsonl" \
             --output "/workspace/runs/${{ inputs.run_name }}" \
             --epochs "${{ inputs.epochs }}" \
             --lr "${{ inputs.lr }}" \
@@ -239,6 +264,7 @@ jobs:
           uv run --with modal modal run modal_train.py \
             --model "${{ inputs.base_model }}" \
             --run-name "${{ inputs.run_name }}" \
+            --dataset-source "${{ inputs.dataset_source || '/workspace/data' }}" \
             --epochs "${{ inputs.epochs }}" \
             --lr "${{ inputs.lr }}" \
             --rank "${{ inputs.lora_rank }}" \

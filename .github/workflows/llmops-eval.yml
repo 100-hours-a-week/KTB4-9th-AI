@@ -65,6 +65,10 @@ on:
         description: "[학습 모드 전용] 학습 최대 스텝 수 (-1이면 전체 에폭, 스모크 테스트 시 5 권장)"
         required: false
         default: "5"
+      dataset_source:
+        description: "[학습 모드 전용] 학습 데이터 경로 또는 HF 레포 (예: /workspace/data, /workspace/data/v3, hf:org/dataset-v3)"
+        required: false
+        default: "/workspace/data"
 
 permissions:
   contents: read
@@ -128,6 +132,7 @@ jobs:
           uv run --with modal modal run modal_train.py \
             --model "${{ inputs.model_id }}" \
             --run-name "${RUN_NAME}" \
+            --dataset-source "${{ inputs.dataset_source || '/workspace/data' }}" \
             --max-steps "${{ inputs.train_max_steps }}" \
             ${HF_OPT}
 
