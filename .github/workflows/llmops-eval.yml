@@ -274,6 +274,17 @@ jobs:
             if [ "${HTTP_CODE}" != "000" ] && [ -s /tmp/vllm_health_resp.txt ]; then
               echo "  [응답 본문 요약]: $(head -c 300 /tmp/vllm_health_resp.txt)"
             fi
+            if [ $((i % 2)) -eq 0 ]; then
+              timeout 8s uv run --with modal modal app logs "${MODAL_APP_NAME}" > /tmp/modal_eval.log 2>&1 || true
+              if [ -s /tmp/modal_eval.log ]; then
+                echo "  --- [Modal 컨테이너 실시간 진행 로그 (최근 8줄)] ---"
+                tail -n 8 /tmp/modal_eval.log | sed 's/^/    /' || true
+                if grep -Eq "\[Fail-Fast\]|1차 기동 및 안전 모드 재시도가 모두 실패|SyntaxError:" /tmp/modal_eval.log; then
+                  echo "❌ Modal 컨테이너에서 치명적 기동 오류가 감지되어 대기를 즉시 중단합니다."
+                  break
+                fi
+              fi
+            fi
             sleep 10
           done
 

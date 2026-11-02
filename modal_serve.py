@@ -397,6 +397,7 @@ def resolve_serving_params(
     max_containers=1,
     scaledown_window=60,
     timeout=60 * MINUTES,
+    startup_timeout=60 * MINUTES,
     secrets=[
         modal.Secret.from_name("cosmos-modal-secret", required_keys=[]),
         modal.Secret.from_dict(
@@ -531,7 +532,7 @@ class ModelServer:
                     if resp.status == 200:
                         print("[vLLM Server] 로컬 /health 준비 완료 (HTTP 200)")
                         return True
-            except urllib.error.URLError, TimeoutError, ConnectionError:
+            except Exception:
                 pass
 
             time.sleep(3)
