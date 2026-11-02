@@ -1,0 +1,268 @@
+name: LLMOps LoRA Training (RunPod & Modal)
+
+on:
+  workflow_dispatch:
+    inputs:
+      train_backend:
+        description: "학습 실행 인프라 (runpod_ssh: RunPod Pod 원격 실행, modal: Modal 서버리스 GPU 실행)"
+        required: true
+        default: "runpod_ssh"
+        type: choice
+        options:
+          - runpod_ssh
+          - modal
+      runpod_mode:
+        description: "RunPod 동작 모드 (train_new: 신규 학습 실행, collect_only: 완료된 학습 결과만 수집·등록)"
+        required: false
+        default: "train_new"
+        type: choice
+        options:
+          - train_new
+          - collect_only
+      base_model:
+        description: "학습할 베이스 모델 ID"
+        required: true
+        default: "Qwen/Qwen3.5-27B"
+      run_name:
+        description: "학습 실행 식별 이름 (/workspace/runs/<run_name>)"
+        required: true
+        default: "27b-v1"
+      hf_repo_id:
+        description: "어댑터를 업로드할 Hugging Face 레포지토리 ID (예: org/qwen3.5-27b-lora-v1, 비우면 생략)"
+        required: false
+        default: ""
+      gpu_type:
+        description: "Modal 서버리스 학습 시 사용할 GPU 기종"
+        required: false
+        default: "A100"
+        type: choice
+        options:
+          - A100
+          - H200
+          - 2xA100
+          - L40S
+      epochs:
+        description: "학습 에폭 수"
+        required: false
+        default: "2"
+      lr:
+        description: "학습률 (Learning Rate)"
+        required: false
+        default: "2e-4"
+      lora_rank:
+        description: "LoRA Rank (r 및 alpha 동일 적용)"
+        required: false
+        default: "16"
+      max_steps:
+        description: "최대 학습 스텝 (-1이면 전체 에폭, 스모크 테스트 시 5 등 지정)"
+        required: false
+        default: "-1"
+      merge_weights:
+        description: "학습 후 bf16 병합 모델(--merge) 추가 생성 여부"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: llmops-train-${{ inputs.run_name }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: Run SFT LoRA Fine-Tuning & Log to MLflow/HF
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_GPU_TYPE: ${{ inputs.gpu_type }}
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI || 'https://mlflow.cosmoscode.site' }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      RUNPOD_SSH_HOST: ${{ secrets.RUNPOD_SSH_HOST }}
+      RUNPOD_SSH_PORT: ${{ secrets.RUNPOD_SSH_PORT || '22' }}
+      RUNPOD_SSH_USER: ${{ secrets.RUNPOD_SSH_USER || 'root' }}
+      RUNPOD_SSH_KEY: ${{ secrets.RUNPOD_SSH_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv sync --locked --group dev
+          uv pip install mlflow boto3 huggingface_hub
+
+      - name: 1A단계 - RunPod Pod SSH 원격 학습 및 결과 수집
+        if: inputs.train_backend == 'runpod_ssh'
+        run: |
+          set -euo pipefail
+          if [ -z "${RUNPOD_SSH_HOST}" ] || [ -z "${RUNPOD_SSH_KEY}" ]; then
+            echo "::error::RunPod SSH 실행을 위해 GitHub Secrets에 RUNPOD_SSH_HOST 및 RUNPOD_SSH_KEY 설정이 필요합니다."
+            exit 1
+          fi
+
+          install -d -m 700 "${HOME}/.ssh"
+          printf '%s\n' "${RUNPOD_SSH_KEY}" > "${RUNNER_TEMP}/runpod_key"
+          chmod 600 "${RUNNER_TEMP}/runpod_key"
+
+          SSH_OPTS="-i ${RUNNER_TEMP}/runpod_key -p ${RUNPOD_SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          SCP_OPTS="-i ${RUNNER_TEMP}/runpod_key -P ${RUNPOD_SSH_PORT} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          REMOTE="${RUNPOD_SSH_USER}@${RUNPOD_SSH_HOST}"
+
+          if [ "${{ inputs.runpod_mode }}" = "train_new" ]; then
+            echo "=================================================="
+            echo "RunPod Pod(${REMOTE}:${RUNPOD_SSH_PORT})에 학습 스크립트 동기화 및 학습 시작"
+            echo "=================================================="
+            scp ${SCP_OPTS} training/train_sft.py "${REMOTE}:/workspace/train_sft.py"
+
+            MERGE_FLAG=""
+            if [ "${{ inputs.merge_weights }}" = "true" ]; then
+              MERGE_FLAG="--merge"
+            fi
+
+            ssh ${SSH_OPTS} "${REMOTE}" bash -s <<EOF
+          set -euo pipefail
+          if [ -f /workspace/env.sh ]; then
+            source /workspace/env.sh
+          fi
+          export HF_TOKEN="${HF_TOKEN}"
+          export HUGGING_FACE_HUB_TOKEN="${HF_TOKEN}"
+
+          # 학습 venv 파이썬 탐색 (없으면 시스템 python3 사용)
+          PYTHON_BIN="/workspace/train-venv/bin/python"
+          if [ ! -x "\${PYTHON_BIN}" ]; then
+            PYTHON_BIN="python3"
+          fi
+
+          # 모델 스냅샷이 캐시에 없으면 사전 다운로드
+          \${PYTHON_BIN} -c "from huggingface_hub import snapshot_download; snapshot_download('${{ inputs.base_model }}')"
+
+          HF_HUB_OFFLINE=1 \${PYTHON_BIN} /workspace/train_sft.py \
+            --model "${{ inputs.base_model }}" \
+            --train /workspace/data/train.jsonl \
+            --val /workspace/data/val.jsonl \
+            --output "/workspace/runs/${{ inputs.run_name }}" \
+            --epochs "${{ inputs.epochs }}" \
+            --lr "${{ inputs.lr }}" \
+            --rank "${{ inputs.lora_rank }}" \
+            --alpha "${{ inputs.lora_rank }}" \
+            --max-steps "${{ inputs.max_steps }}" \
+            ${MERGE_FLAG}
+          EOF
+          fi
+
+          # RunPod에서 직접 Hugging Face Hub로 어댑터 고속 업로드 (지정된 경우)
+          if [ -n "${{ inputs.hf_repo_id }}" ]; then
+            echo "RunPod에서 Hugging Face Hub(${{ inputs.hf_repo_id }})로 어댑터 직접 업로드를 수행합니다..."
+            TARGET_SUBDIR="adapter"
+            if [ "${{ inputs.merge_weights }}" = "true" ]; then
+              TARGET_SUBDIR="merged"
+            fi
+            ssh ${SSH_OPTS} "${REMOTE}" bash -s <<EOF
+          set -euo pipefail
+          if [ -f /workspace/env.sh ]; then
+            source /workspace/env.sh
+          fi
+          export HF_TOKEN="${HF_TOKEN}"
+          PYTHON_BIN="/workspace/train-venv/bin/python"
+          if [ ! -x "\${PYTHON_BIN}" ]; then
+            PYTHON_BIN="python3"
+          fi
+          \${PYTHON_BIN} -c "
+          from huggingface_hub import HfApi
+          api = HfApi(token='${HF_TOKEN}')
+          api.create_repo(repo_id='${{ inputs.hf_repo_id }}', repo_type='model', exist_ok=True)
+          api.upload_folder(
+              repo_id='${{ inputs.hf_repo_id }}',
+              folder_path='/workspace/runs/${{ inputs.run_name }}/${TARGET_SUBDIR}',
+              repo_type='model',
+              commit_message='Upload trained ${TARGET_SUBDIR} (${{ inputs.run_name }}) from RunPod'
+          )
+          api.upload_file(
+              path_or_fileobj='/workspace/runs/${{ inputs.run_name }}/run_config.json',
+              path_in_repo='run_config.json',
+              repo_id='${{ inputs.hf_repo_id }}',
+              repo_type='model',
+              commit_message='Add run_config.json'
+          )
+          "
+          EOF
+          fi
+
+          # run_config.json을 GitHub Actions 러너로 수집
+          mkdir -p "training/runs/${{ inputs.run_name }}"
+          scp ${SCP_OPTS} "${REMOTE}:/workspace/runs/${{ inputs.run_name }}/run_config.json" "training/runs/${{ inputs.run_name }}/run_config.json"
+
+      - name: 1B단계 - Modal 서버리스 GPU에서 LoRA 파인튜닝 실행
+        if: inputs.train_backend == 'modal'
+        run: |
+          echo "=================================================="
+          echo "Modal 서버리스 GPU(${MODAL_GPU_TYPE})에서 LoRA 학습 시작"
+          echo "- 베이스 모델: ${{ inputs.base_model }}"
+          echo "- 실행 이름: ${{ inputs.run_name }}"
+          echo "=================================================="
+          MERGE_OPT=""
+          if [ "${{ inputs.merge_weights }}" = "true" ]; then
+            MERGE_OPT="--merge"
+          fi
+          HF_OPT=""
+          if [ -n "${{ inputs.hf_repo_id }}" ]; then
+            HF_OPT="--hf-repo-id ${{ inputs.hf_repo_id }}"
+          fi
+
+          uv run --with modal modal run modal_train.py \
+            --model "${{ inputs.base_model }}" \
+            --run-name "${{ inputs.run_name }}" \
+            --epochs "${{ inputs.epochs }}" \
+            --lr "${{ inputs.lr }}" \
+            --rank "${{ inputs.lora_rank }}" \
+            --alpha "${{ inputs.lora_rank }}" \
+            --max-steps "${{ inputs.max_steps }}" \
+            ${MERGE_OPT} \
+            ${HF_OPT}
+
+      - name: Configure AWS credentials for S3 Backup
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_STAGE_CD_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-2
+
+      - name: 2단계 - MLflow, S3 및 GitHub Summary에 학습 메트릭 기록
+        run: |
+          uv run python .github/scripts/log_train_to_mlflow.py \
+            --run-dir "training/runs/${{ inputs.run_name }}" \
+            --run-name "${{ inputs.run_name }}"
+
+      - name: 학습 메타데이터 아티팩트 보관
+        uses: actions/upload-artifact@v4
+        with:
+          name: train-metadata-${{ inputs.run_name }}-${{ github.run_id }}
+          path: training/runs/${{ inputs.run_name }}/
+
+      - name: 디스코드 학습 완료 알림 발송
+        if: env.DISCORD_WEBHOOK_URL != ''
+        run: |
+          curl -H "Content-Type: application/json" -X POST \
+            -d "{\"content\": \"🛠️ **[LLMOps LoRA 파인튜닝 완료]**\n- **인프라**: \`${{ inputs.train_backend }}\`\n- **베이스 모델**: \`${{ inputs.base_model }}\`\n- **실행 이름**: \`${{ inputs.run_name }}\`\n- **HF 레포지토리**: \`${{ inputs.hf_repo_id || '미지정(볼륨 저장)' }}\`\n상세 Loss 리포트: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            "${DISCORD_WEBHOOK_URL}"
