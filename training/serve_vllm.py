@@ -48,8 +48,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-model-len",
         type=int,
-        default=8192,
-        help="프롬프트 + 생성 최대 토큰. 정답이 최대 2,300토큰쯤이라 넉넉히 둔다",
+        default=4096,
+        help=(
+            "프롬프트 + 생성 최대 토큰. 학습 max_seq_length와 같다. 평가는 "
+            "max_tokens를 주지 않으므로 반복에 빠진 생성도 이 길이에서 끊긴다"
+        ),
+    )
+    parser.add_argument(
+        "--max-num-seqs",
+        type=int,
+        default=64,
+        help=(
+            "동시에 처리할 최대 요청 수. Qwen3.5의 선형 어텐션은 요청마다 상태 "
+            "블록이 필요해서 vLLM 기본값(1024)이면 기동에 실패할 수 있다"
+        ),
     )
     parser.add_argument(
         "--api-key-file", type=Path, default=Path("/workspace/.vllm_api_key")
@@ -120,6 +132,8 @@ def build_command(
         args.model,
         "--max-model-len",
         str(args.max_model_len),
+        "--max-num-seqs",
+        str(args.max_num_seqs),
         "--tensor-parallel-size",
         str(args.tensor_parallel_size),
         "--port",
