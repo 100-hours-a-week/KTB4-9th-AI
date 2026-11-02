@@ -86,9 +86,10 @@ jobs:
       LABEL: eval-${{ github.run_id }}
       MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_APP_NAME: cosmos-vllm-eval
       MODAL_GPU_TYPE: ${{ inputs.gpu_type }}
       MODEL_ID: ${{ inputs.model_id }}
-      VLLM_URL: ${{ secrets.VLLM_URL }}
+      VLLM_URL: ${{ secrets.VLLM_EVAL_URL || 'https://cosmos261117--cosmos-vllm-eval-modelserver-serve.us-east.modal.run/' }}
       VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       JUDGE0_URL: ${{ secrets.JUDGE0_URL || 'https://stage-judge.cosmoscode.site' }}
@@ -136,7 +137,7 @@ jobs:
       - name: 0단계 - Modal 서버리스 vLLM 인스턴스 배포 및 활성화
         run: |
           echo "=================================================="
-          echo "Modal vLLM 서버리스 배포 시작"
+          echo "Modal vLLM 서버리스 배포 시작 (평가 전용 인스턴스: ${MODAL_APP_NAME})"
           echo "- 모델: ${{ inputs.model_id }}"
           echo "- GPU: ${{ inputs.gpu_type }}"
           echo "=================================================="
@@ -237,17 +238,38 @@ jobs:
             -d "{\"content\": \"🚀 **[LLMOps 평가 완료]**\n- **대상 환경**: \`${{ inputs.target_env }}\`\n- **유형**: \`${{ inputs.track_type }}\`\n- **모델**: \`${{ inputs.model_id }}\`\n- **프롬프트**: \`${{ inputs.prompt_version }}\`\n- **결과 라벨**: \`${{ env.LABEL }}\`\nGitHub Actions 요약 화면에서 승인 여부를 결정하세요: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
             "${DISCORD_WEBHOOK_URL}"
 
+      - name: 평가 완료 후 임시 평가용 Modal 인스턴스 정리
+        if: always()
+        run: |
+          echo "=================================================="
+          echo "평가용 Modal 인스턴스 정리 (${MODAL_APP_NAME})"
+          echo "=================================================="
+          uv run --with modal modal app stop "${MODAL_APP_NAME}" || true
+
   promote-release:
-    name: Promote Approved Model to AWS SSM Parameter Store
+    name: Promote Approved Model to Modal Serving & AWS SSM
     needs: evaluate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: production-approval
 
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
       - name: 대상 환경 파라미터 및 리전 설정
         id: env-setup
         run: |
@@ -260,6 +282,56 @@ jobs:
             echo "aws_region=us-west-2" >> $GITHUB_OUTPUT
             echo "env_name=Dev (오레곤 EC2)" >> $GITHUB_OUTPUT
           fi
+
+      - name: 운영 Modal vLLM 인스턴스 배포 (승인 모델 반영)
+        run: |
+          echo "=================================================="
+          echo "승인된 모델을 운영 Modal 인스턴스(cosmos-vllm-serve)에 배포합니다."
+          echo "- 대상 환경: ${{ steps.env-setup.outputs.env_name }}"
+          echo "- 모델: ${{ inputs.model_id }}"
+          echo "- GPU: ${{ inputs.gpu_type }}"
+          echo "=================================================="
+          uv run --with modal modal deploy modal_serve.py
+        env:
+          MODAL_APP_NAME: "cosmos-vllm-serve"
+          MODEL_ID: ${{ inputs.model_id }}
+          MODAL_GPU_TYPE: ${{ inputs.gpu_type }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+
+      - name: 운영 vLLM 추론 엔드포인트 기동 상태 확인
+        run: |
+          echo "=================================================="
+          echo "운영 vLLM 추론 엔드포인트 상태 확인 중..."
+          echo "=================================================="
+          BASE_ENDPOINT="${VLLM_URL%/v1}"
+          HEALTH_URL="${BASE_ENDPOINT}/v1/models"
+          echo "확인 대상 URL: ${HEALTH_URL}"
+
+          SUCCESS=0
+          for i in {1..35}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${VLLM_API_KEY}" \
+              --max-time 15 \
+              "${HEALTH_URL}" || true)
+
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "✅ 운영 vLLM 서버 준비 완료 (HTTP 200)"
+              SUCCESS=1
+              break
+            fi
+
+            echo "운영 vLLM 서버 기동 대기 중 (시도 ${i}/35, 응답 코드: ${HTTP_CODE})... 10초 후 재시도"
+            sleep 10
+          done
+
+          if [ "${SUCCESS}" -ne 1 ]; then
+            echo "❌ 운영 vLLM 서버 기동 확인 실패 (타임아웃)"
+            exit 1
+          fi
+        env:
+          VLLM_URL: ${{ secrets.VLLM_URL }}
+          VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -294,5 +366,5 @@ jobs:
         if: env.DISCORD_WEBHOOK_URL != ''
         run: |
           curl -H "Content-Type: application/json" -X POST \
-            -d "{\"content\": \"✅ **[LLMOps 모델 승격 승인 - ${{ steps.env-setup.outputs.env_name }}]**\n- **대상 환경**: \`${{ steps.env-setup.outputs.env_name }}\`\n- **승인 모델**: \`${{ inputs.model_id }}\`\n- **적용 파라미터**: \`${{ steps.env-setup.outputs.param_name }}\` (${{ steps.env-setup.outputs.aws_region }})\n${{ steps.env-setup.outputs.env_name }} 환경에서 이 모델로 자동 추론됩니다.\"}" \
+            -d "{\"content\": \"✅ **[LLMOps 모델 승격 승인 - ${{ steps.env-setup.outputs.env_name }}]**\n- **대상 환경**: \`${{ steps.env-setup.outputs.env_name }}\`\n- **승인 모델**: \`${{ inputs.model_id }}\`\n- **적용 파라미터**: \`${{ steps.env-setup.outputs.param_name }}\` (${{ steps.env-setup.outputs.aws_region }})\n- **운영 서빙 앱**: \`cosmos-vllm-serve\`\n${{ steps.env-setup.outputs.env_name }} 환경에서 이 모델로 자동 추론됩니다.\"}" \
             "${DISCORD_WEBHOOK_URL}"

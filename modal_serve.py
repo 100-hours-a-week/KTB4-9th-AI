@@ -20,7 +20,7 @@ import subprocess
 
 import modal
 
-APP_NAME = "cosmos-vllm-serve"
+APP_NAME = os.environ.get("MODAL_APP_NAME", "cosmos-vllm-serve")
 VOLUME_NAME = "cosmos-model-cache"
 DEFAULT_MODEL_ID = "Qwen/Qwen3.5-122B-A10B-FP8"
 CACHE_DIR = "/root/.cache/huggingface"
@@ -31,7 +31,7 @@ app = modal.App(APP_NAME)
 volume = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
 
 
-def get_gpu_config() -> tuple[any, int]:
+def get_gpu_config(gpu_type: str | None = None) -> tuple[any, int]:
     """
     MODAL_GPU_TYPE 환경 변수에 따라 적절한 GPU 리소스와 텐서 병렬 크기(TP)를 반환한다.
 
@@ -43,7 +43,9 @@ def get_gpu_config() -> tuple[any, int]:
         - L4 (24GB VRAM, W4A16 양자화 모델 권장)
         - L40S (48GB VRAM)
     """
-    gpu_type = os.environ.get("MODAL_GPU_TYPE", "H200").upper().strip()
+    if not gpu_type:
+        gpu_type = os.environ.get("MODAL_GPU_TYPE", "H200")
+    gpu_type = gpu_type.upper().strip()
 
     if gpu_type == "H200":
         return "H200", 1
@@ -64,7 +66,9 @@ def get_gpu_config() -> tuple[any, int]:
     return gpu_type, 1
 
 
-SELECTED_GPU, TENSOR_PARALLEL_SIZE = get_gpu_config()
+SELECTED_MODEL_ID = os.environ.get("MODEL_ID", DEFAULT_MODEL_ID)
+SELECTED_GPU_TYPE = os.environ.get("MODAL_GPU_TYPE", "H200")
+SELECTED_GPU, TENSOR_PARALLEL_SIZE = get_gpu_config(SELECTED_GPU_TYPE)
 
 # 최신 vLLM 및 Qwen3.5 지원을 위한 transformers >= 5.0 설치
 vllm_image = modal.Image.from_registry(
@@ -90,6 +94,12 @@ vllm_image = modal.Image.from_registry(
     secrets=[
         # MODAL_API_KEY (또는 VLLM_API_KEY) 및 HF_TOKEN 주입
         modal.Secret.from_name("cosmos-modal-secret", required_keys=[]),
+        # 배포 시 지정된 모델 ID 및 GPU/TP 환경 변수를 클라우드 컨테이너에 명시적으로 주입
+        modal.Secret.from_dict({
+            "MODEL_ID": SELECTED_MODEL_ID,
+            "MODAL_GPU_TYPE": SELECTED_GPU_TYPE,
+            "TENSOR_PARALLEL_SIZE": str(TENSOR_PARALLEL_SIZE),
+        }),
     ],
 )
 @modal.concurrent(max_inputs=32)
@@ -101,13 +111,14 @@ class ModelServer:
         # 최신 캐싱된 가중치를 컨테이너 파일시스템에 즉시 동기화
         volume.reload()
 
-        model_id = os.environ.get("MODEL_ID", DEFAULT_MODEL_ID)
+        model_id = os.environ.get("MODEL_ID", SELECTED_MODEL_ID)
         api_key = (
             os.environ.get("VLLM_API_KEY") or os.environ.get("MODAL_API_KEY") or "EMPTY"
         )
         hf_token = os.environ.get("HF_TOKEN") or os.environ.get(
             "HUGGING_FACE_HUB_TOKEN"
         )
+        tp_size = int(os.environ.get("TENSOR_PARALLEL_SIZE", TENSOR_PARALLEL_SIZE))
 
         if hf_token:
             os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
@@ -115,6 +126,7 @@ class ModelServer:
         print("=" * 60)
         print(f"[vLLM Server] 기동 시작: {model_id}")
         print(f"[vLLM Server] 마운트 볼륨: {VOLUME_NAME} -> {CACHE_DIR}")
+        print(f"[vLLM Server] GPU 기종: {SELECTED_GPU} (TP={tp_size})")
         auth_desc = "설정됨" if api_key != "EMPTY" else "비활성화(EMPTY)"
         print(f"[vLLM Server] API 인증: {auth_desc}")
         print("=" * 60)
@@ -128,7 +140,7 @@ class ModelServer:
             "--host",
             "0.0.0.0",
             "--tensor-parallel-size",
-            str(TENSOR_PARALLEL_SIZE),
+            str(tp_size),
             "--max-num-seqs",
             "256",
             "--max-model-len",
@@ -143,7 +155,13 @@ class ModelServer:
             api_key,
         ]
 
-        print(f"[vLLM Server] 실행 명령어: {' '.join(cmd)}")
+        # 로그 출력 시 보안을 위해 --api-key 값 마스킹
+        display_cmd = list(cmd)
+        if "--api-key" in display_cmd:
+            key_idx = display_cmd.index("--api-key") + 1
+            if key_idx < len(display_cmd):
+                display_cmd[key_idx] = "********"
+        print(f"[vLLM Server] 실행 명령어: {' '.join(display_cmd)}")
         self.process = subprocess.Popen(cmd)
 
     @modal.exit()
