@@ -19,6 +19,14 @@ on:
         options:
           - train_new
           - collect_only
+      runpod_ssh_host:
+        description: "RunPod SSH 접속 IP/호스트 (비워두면 GitHub Secret의 RUNPOD_SSH_HOST 사용)"
+        required: false
+        default: ""
+      runpod_ssh_port:
+        description: "RunPod SSH 접속 포트 (비워두면 GitHub Secret의 RUNPOD_SSH_PORT 사용)"
+        required: false
+        default: ""
       base_model:
         description: "학습할 베이스 모델 ID"
         required: true
@@ -86,8 +94,8 @@ jobs:
       MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      RUNPOD_SSH_HOST: ${{ secrets.RUNPOD_SSH_HOST }}
-      RUNPOD_SSH_PORT: ${{ secrets.RUNPOD_SSH_PORT || '22' }}
+      RUNPOD_SSH_HOST: ${{ inputs.runpod_ssh_host || secrets.RUNPOD_SSH_HOST }}
+      RUNPOD_SSH_PORT: ${{ inputs.runpod_ssh_port || secrets.RUNPOD_SSH_PORT || '22' }}
       RUNPOD_SSH_USER: ${{ secrets.RUNPOD_SSH_USER || 'root' }}
       RUNPOD_SSH_KEY: ${{ secrets.RUNPOD_SSH_KEY }}
 
