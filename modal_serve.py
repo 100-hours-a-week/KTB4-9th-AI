@@ -17,9 +17,6 @@ import os
 import re
 import subprocess
 import threading
-import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -484,61 +481,39 @@ class ModelServer:
                 display_cmd[key_idx] = "********"
         return " ".join(display_cmd)
 
-    def _spawn_and_wait_ready(
-        self, cmd: list[str], log_path: Path, timeout_s: int = 600
-    ) -> bool:
-        """vLLM을 실행하고 로컬 /health 엔드포인트가 응답할 때까지 감시한다."""
-        print(f"[vLLM Server] 실행 명령어: {self._mask_cmd(cmd)}")
-        log_file = log_path.open("w", encoding="utf-8")
-        self.process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
+    def _start_vllm_with_watchdog(
+        self, primary_cmd: list[str], fallback_cmd: list[str]
+    ) -> None:
+        """vLLM을 즉시 기동하고 백그라운드에서 비정상 종료 시 안전 모드로 재시도한다."""
+        print(f"[vLLM Server] 실행 명령어: {self._mask_cmd(primary_cmd)}", flush=True)
+        self.process = subprocess.Popen(primary_cmd)
 
-        def _stream_logs(proc: subprocess.Popen, out_file) -> None:
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                print(line, end="", flush=True)
-                out_file.write(line)
-                out_file.flush()
+        def _watchdog() -> None:
+            exit_code = self.process.wait()
+            if getattr(self, "_stopping", False) or exit_code == 0:
+                return
+            print("=" * 60, flush=True)
+            print(
+                f"[Self-Healing] 1차 vLLM 프로세스 비정상 종료 (exit={exit_code}) "
+                f"-> 안전 모드 파라미터로 즉시 재기동합니다.",
+                flush=True,
+            )
+            print(
+                f"[vLLM Server] 안전 모드 명령어: {self._mask_cmd(fallback_cmd)}",
+                flush=True,
+            )
+            print("=" * 60, flush=True)
+            self.process = subprocess.Popen(fallback_cmd)
+            retry_exit = self.process.wait()
+            if not getattr(self, "_stopping", False) and retry_exit != 0:
+                print(
+                    f"[vLLM Fatal] 1차 기동 및 안전 모드 재시도가 모두 실패했습니다 "
+                    f"(exit={retry_exit}).",
+                    flush=True,
+                )
+                os._exit(1)
 
-        reader = threading.Thread(
-            target=_stream_logs, args=(self.process, log_file), daemon=True
-        )
-        reader.start()
-
-        health_url = f"http://127.0.0.1:{VLLM_PORT}/health"
-        deadline = time.time() + timeout_s
-        while time.time() < deadline:
-            exit_code = self.process.poll()
-            if exit_code is not None:
-                time.sleep(1)
-                log_file.close()
-                print("=" * 60)
-                print(f"[vLLM Crash Report] 프로세스 비정상 종료 (exit: {exit_code})")
-                if log_path.exists():
-                    tail_lines = log_path.read_text(
-                        encoding="utf-8", errors="replace"
-                    ).splitlines()[-50:]
-                    print("\n".join(tail_lines))
-                print("=" * 60)
-                return False
-
-            try:
-                with urllib.request.urlopen(health_url, timeout=2) as resp:
-                    if resp.status == 200:
-                        print("[vLLM Server] 로컬 /health 준비 완료 (HTTP 200)")
-                        return True
-            except Exception:
-                pass
-
-            time.sleep(3)
-
-        print(f"[vLLM Server] {timeout_s}초 내에 기동되지 않았습니다.")
-        return False
+        threading.Thread(target=_watchdog, daemon=True).start()
 
     @modal.enter()
     def startup(self):
@@ -649,9 +624,6 @@ class ModelServer:
             lora_spec=lora_spec,
         )
 
-        if self._spawn_and_wait_ready(cmd, Path("/tmp/vllm_startup_1.log")):
-            return
-
         fallback_params = dict(params)
         fallback_params["max_num_seqs"] = max(16, params["max_num_seqs"] // 2)
         fallback_params["max_model_len"] = min(params["max_model_len"], 4096)
@@ -659,16 +631,6 @@ class ModelServer:
             params["gpu_memory_utilization"], 0.88
         )
         fallback_params["enforce_eager"] = True
-
-        print("=" * 60)
-        print("[Self-Healing] 1차 기동 실패 -> 안전 모드로 파라미터를 축소해 재기동")
-        print(
-            f"  - 안전 모드 파라미터: max_num_seqs={fallback_params['max_num_seqs']}, "
-            f"max_model_len={fallback_params['max_model_len']}, "
-            f"gpu_mem_util={fallback_params['gpu_memory_utilization']}, "
-            f"enforce_eager=True"
-        )
-        print("=" * 60)
 
         retry_cmd = self._build_vllm_command(
             snapshot_path=str(snapshot_dir),
@@ -680,14 +642,13 @@ class ModelServer:
             lora_spec=lora_spec,
         )
 
-        if not self._spawn_and_wait_ready(retry_cmd, Path("/tmp/vllm_startup_2.log")):
-            raise RuntimeError(
-                "[vLLM Server] 1차 기동 및 안전 모드 재시도가 모두 실패했습니다."
-            )
+        self._stopping = False
+        self._start_vllm_with_watchdog(cmd, retry_cmd)
 
     @modal.exit()
     def stop(self):
         """컨테이너 종료 시 vLLM 프로세스를 정상 정리한다."""
+        self._stopping = True
         if hasattr(self, "process") and self.process and self.process.poll() is None:
             print("[vLLM Server] 프로세스 종료 신호 전송...")
             self.process.terminate()
