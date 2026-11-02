@@ -109,7 +109,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --locked --group dev
-          uv pip install mlflow boto3 huggingface_hub
+          uv pip install mlflow boto3 huggingface_hub huggingface_hub
 
       - name: LoRA 파인튜닝 실행 (Modal GPU / training/train_sft.py)
         run: |
@@ -222,7 +222,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --locked --group dev
-          uv pip install mlflow boto3
+          uv pip install mlflow boto3 huggingface_hub
 
       - name: 0.2단계 - 로컬 DB 마이그레이션 및 Few-shot·Langfuse 리소스 동기화
         run: |
@@ -345,12 +345,18 @@ jobs:
           echo "=================================================="
           uv run python -m evals.summarize "${LABEL}" --out "evals/results/${LABEL}/summary.md"
 
-      - name: 4단계 - MLflow 및 S3에 메트릭 기록
+      - name: 4단계 - MLflow 및 S3에 메트릭 기록 (외부 학습 어댑터 메타데이터 포함)
         continue-on-error: true
         run: |
           DISPLAY_MODEL="${MODEL_ID}"
           if [ -n "${LORA_ADAPTER_ID}" ]; then
             DISPLAY_MODEL="${MODEL_ID}+${LORA_ADAPTER_ID}"
+            if [ "${{ inputs.pipeline_mode }}" = "evaluate_only" ]; then
+              echo "외부(RunPod 등)에서 업로드된 HF 어댑터(${LORA_ADAPTER_ID})의 학습 메타데이터를 MLflow에 기록합니다..."
+              uv run python .github/scripts/log_train_to_mlflow.py \
+                --from-hf-repo "${LORA_ADAPTER_ID}" \
+                --run-name "hf-${LABEL}" || true
+            fi
           fi
           uv run python .github/scripts/log_eval_to_mlflow.py \
             --label "${LABEL}" \

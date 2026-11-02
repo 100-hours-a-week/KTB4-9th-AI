@@ -27,8 +27,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--run-dir",
         type=Path,
-        required=True,
-        help="train_sft.py의 --output 디렉터리 경로",
+        default=None,
+        help="train_sft.py의 --output 디렉터리 경로 (--from-hf-repo 사용 시 생략 가능)",
+    )
+    parser.add_argument(
+        "--from-hf-repo",
+        default="",
+        help="HF Hub 어댑터 레포지토리에서 메타데이터를 내려받아 MLflow에 기록",
     )
     parser.add_argument(
         "--run-name",
@@ -269,8 +274,120 @@ def write_github_summary(
         out.write("\n")
 
 
+def fetch_metadata_from_hf(hf_repo_id: str, cache_dir: Path) -> Path | None:
+    """HF 레포지토리에서 run_config.json 또는 adapter_config.json을 수집한다."""
+    hf_token = (
+        os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None
+    )
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    out_cfg_path = cache_dir / "run_config.json"
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        try:
+            downloaded = hf_hub_download(
+                repo_id=hf_repo_id,
+                filename="run_config.json",
+                token=hf_token,
+            )
+            out_cfg_path.write_text(
+                Path(downloaded).read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            logger.info("HF Hub에서 run_config.json 수집 완료: %s", hf_repo_id)
+            return out_cfg_path
+        except Exception:  # noqa: BLE001
+            logger.info(
+                "HF 레포지토리(%s)에 run_config.json이 없어 "
+                "adapter_config.json에서 메타데이터를 추출합니다.",
+                hf_repo_id,
+            )
+
+        adapter_file = hf_hub_download(
+            repo_id=hf_repo_id,
+            filename="adapter_config.json",
+            token=hf_token,
+        )
+        adapter_cfg = json.loads(Path(adapter_file).read_text(encoding="utf-8"))
+
+        log_history = []
+        steps = 0
+        final_train_loss = None
+        eval_loss = None
+        try:
+            state_file = hf_hub_download(
+                repo_id=hf_repo_id,
+                filename="trainer_state.json",
+                token=hf_token,
+            )
+            state_cfg = json.loads(Path(state_file).read_text(encoding="utf-8"))
+            log_history = state_cfg.get("log_history", [])
+            steps = int(state_cfg.get("global_step", 0))
+            train_losses = [x["loss"] for x in log_history if "loss" in x]
+            eval_losses = [x["eval_loss"] for x in log_history if "eval_loss" in x]
+            if train_losses:
+                final_train_loss = train_losses[-1]
+            if eval_losses:
+                eval_loss = eval_losses[-1]
+        except Exception:  # noqa: BLE001
+            pass
+
+        base_model = adapter_cfg.get("base_model_name_or_path", "unknown")
+        synthetic_cfg = {
+            "model": {"id": base_model, "revision": "hf-adapter"},
+            "gpu": "RunPod (External)",
+            "args": {
+                "model": base_model,
+                "rank": adapter_cfg.get("r", 16),
+                "alpha": adapter_cfg.get("lora_alpha", 16),
+                "epochs": 0,
+                "lr": 0.0,
+                "batch_size": 1,
+                "grad_accum": 8,
+                "max_seq_length": 4096,
+            },
+            "data": {"train": {"count": 0}, "val": {"count": 0}},
+            "result": {
+                "seconds": 0.0,
+                "steps": steps,
+                "final_train_loss": final_train_loss,
+                "eval_loss": eval_loss,
+                "peak_vram_gb": 0.0,
+            },
+            "log_history": log_history,
+        }
+        out_cfg_path.write_text(
+            json.dumps(synthetic_cfg, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return out_cfg_path
+    except Exception as error:  # noqa: BLE001
+        logger.warning("HF Hub 어댑터 메타데이터 조회 실패: %s", error)
+        return None
+
+
 def main() -> None:
     args = parse_args()
+    hf_repo_id = (args.from_hf_repo or args.hf_repo_id or "").strip()
+
+    if args.from_hf_repo:
+        target_dir = args.run_dir or Path("/tmp/hf_adapter_meta")
+        run_cfg_path = fetch_metadata_from_hf(args.from_hf_repo, target_dir)
+        if run_cfg_path is None or not run_cfg_path.exists():
+            logger.warning("HF 어댑터 메타데이터를 찾을 수 없어 기록을 종료합니다.")
+            return
+        config = json.loads(run_cfg_path.read_text(encoding="utf-8"))
+        run_name = args.run_name or args.from_hf_repo.replace("/", "-")
+        hf_url = f"https://huggingface.co/{args.from_hf_repo}"
+        log_to_mlflow(config, run_cfg_path, run_name, hf_repo_id)
+        backup_to_s3(run_cfg_path, run_name, args.s3_bucket)
+        write_github_summary(config, run_name, hf_repo_id, hf_url)
+        return
+
+    if args.run_dir is None:
+        logger.error("--run-dir 또는 --from-hf-repo 중 하나는 반드시 지정해야 합니다.")
+        sys.exit(1)
+
     run_cfg_path = args.run_dir / "run_config.json"
     if not run_cfg_path.exists():
         logger.error(
