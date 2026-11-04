@@ -135,7 +135,8 @@ def summarize(rows: list[dict]) -> None:
     print()
     print("=" * 62)
     print(
-        f"전체 {len(rows)}건  |  성공 {len(success)}  폐기 {len(discarded)}  오류 {len(errors)}"
+        f"전체 {len(rows)}건  |  성공 {len(success)}  "
+        f"폐기 {len(discarded)}  오류 {len(errors)}"
     )
     if rows:
         print(f"유효 문제 생성률: {len(success) / len(rows) * 100:.1f}%")
