@@ -194,7 +194,7 @@ jobs:
       MODEL_ID: ${{ inputs.model_id }}
       LORA_ADAPTER_ID: ${{ inputs.lora_adapter_id }}
       LORA_ADAPTER_NAME: ${{ inputs.lora_adapter_id && 'trained-lora-adapter' || '' }}
-      VLLM_URL: ${{ secrets.VLLM_EVAL_URL || 'https://cosmos261117--cosmos-vllm-eval-modelserver-serve.us-east.modal.run' }}
+      VLLM_URL: ${{ secrets.VLLM_EVAL_URL || 'https://haram891--cosmos-vllm-eval-modelserver-serve.us-east.modal.run' }}
       VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       JUDGE0_URL: ${{ secrets.JUDGE0_URL || 'https://stage-judge.cosmoscode.site' }}
@@ -395,13 +395,15 @@ jobs:
   promote-release:
     name: Promote Approved Model to Modal Serving & AWS SSM
     needs: evaluate
-    if: inputs.pipeline_mode != 'train_only' && needs.evaluate.result == 'success'
+    if: always() && inputs.pipeline_mode != 'train_only' && needs.evaluate.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production-approval
 
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      VLLM_URL: ${{ secrets.VLLM_URL || 'https://haram891--cosmos-vllm-serve-modelserver-serve.us-east.modal.run' }}
+      VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
 
     steps:
       - name: Checkout code
