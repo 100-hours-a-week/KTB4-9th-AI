@@ -146,6 +146,7 @@ class FakeBatch:
     def __init__(self) -> None:
         self.acquired = True
         self.lock_error: Exception | None = None
+        self.judge0_healthy = True
         # 기본은 모든 조합이 이미 꽉 찬 상태. 테스트가 필요한 조합만 비운다.
         self.demands: list[ProblemDemand] | Exception = [
             demand(key, TARGET_STOCK) for key in ALL_KEYS
@@ -162,6 +163,7 @@ class FakeBatch:
         self.battle_error: Exception | None = None
         self.battle_outcomes: list[bool] = []  # 앞에서부터 꺼낸다. 비면 성공
 
+        self.health_calls = 0
         self.demand_calls = 0
         self.daily_calls: list[Trigger] = []
         self.battle_calls: list[Trigger] = []
@@ -169,6 +171,10 @@ class FakeBatch:
         self.steps: list[str] = []  # 단계가 처음 불린 순서
         self.running = 0
         self.peak = 0
+
+    async def is_healthy(self) -> bool:
+        self.health_calls += 1
+        return self.judge0_healthy
 
     def set_spring(self, key: tuple, count: int) -> None:
         assert isinstance(self.demands, list)
@@ -242,6 +248,7 @@ class FakeBatch:
 def fake(monkeypatch: pytest.MonkeyPatch) -> FakeBatch:
     batch = FakeBatch()
     monkeypatch.setattr(module, "try_advisory_lock", batch.lock)
+    monkeypatch.setattr(module, "is_healthy", batch.is_healthy)
     monkeypatch.setattr(module, "get_problem_demands", batch.get_problem_demands)
     monkeypatch.setattr(module, "load_pending", batch.load_pending)
     monkeypatch.setattr(
@@ -265,6 +272,22 @@ async def test_another_instance_holding_the_lock_skips_everything(fake) -> None:
     assert fake.battle_calls == []
     assert fake.demand_calls == 0
     assert fake.graph_calls == []
+    assert fake.health_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unhealthy_judge0_skips_every_step(fake, caplog) -> None:
+    fake.judge0_healthy = False
+    fake.set_spring(DP2, 0)
+
+    with caplog.at_level(logging.ERROR):
+        await run_generate()
+
+    assert fake.daily_calls == []
+    assert fake.battle_calls == []
+    assert fake.demand_calls == 0
+    assert fake.graph_calls == []
+    assert "judge0를 사용할 수 없어" in caplog.text
 
 
 @pytest.mark.asyncio

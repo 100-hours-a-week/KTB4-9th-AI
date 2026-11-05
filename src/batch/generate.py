@@ -13,6 +13,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable
 
 from src.client.backend import get_problem_demands
+from src.client.judge0 import is_healthy
 from src.client.llm import batch_model_name
 from src.core.config import get_settings
 from src.core.enums import Category, Difficulty, LockKey, ProblemPurpose, Trigger
@@ -277,6 +278,12 @@ async def run_generate(only: str | None = None) -> None:
         async with try_advisory_lock(LockKey.BATCH_GENERATE) as acquired:
             if not acquired:
                 logger.info("다른 인스턴스가 생성 배치를 실행 중이라 건너뜀")
+                return
+
+            # 그래프는 LLM을 여러 번 부른 뒤에야 judge0에 닿는다.
+            # 죽어 있는 채로 돌리면 호출만 쓰고 전부 폐기된다.
+            if not await is_healthy():
+                logger.error("judge0를 사용할 수 없어 생성 배치를 건너뜀")
                 return
 
             for step in steps:

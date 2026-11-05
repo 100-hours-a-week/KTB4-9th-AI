@@ -1,10 +1,11 @@
+import asyncio
 import json
 
 import httpx
 import pytest
 
 from src.client import judge0
-from src.client.judge0 import LANGUAGE_TO_ID, run_batch, run_code
+from src.client.judge0 import LANGUAGE_TO_ID, is_healthy, run_batch, run_code
 from src.core.enums import ExecutionStatus, Language
 from src.schema.problem import ExecutionLimit
 
@@ -379,3 +380,48 @@ async def test_batch_skips_unknown_tokens_until_the_deadline(monkeypatch) -> Non
     results = await run_many(["1"])
 
     assert results[0].status is ExecutionStatus.INTERNAL_ERROR
+
+
+@pytest.mark.asyncio
+async def test_healthy_when_code_actually_runs(monkeypatch) -> None:
+    requests = fix_judge0(monkeypatch, reply(3, stdout="1\n"))
+
+    assert await is_healthy() is True
+    assert requests[0].url.params["wait"] == "true"
+
+
+@pytest.mark.asyncio
+async def test_unhealthy_when_sandbox_fails(monkeypatch) -> None:
+    # API 서버는 살아 있어도 13(Internal Error)이면 코드를 실행하지 못한 것이다
+    fix_judge0(monkeypatch, reply(13, message="sandbox failed"))
+
+    assert await is_healthy() is False
+
+
+@pytest.mark.asyncio
+async def test_unhealthy_on_server_error(monkeypatch) -> None:
+    fix_judge0(monkeypatch, lambda request: httpx.Response(503))
+
+    assert await is_healthy() is False
+
+
+@pytest.mark.asyncio
+async def test_unhealthy_when_connection_fails(monkeypatch) -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    fix_judge0(monkeypatch, refuse)
+
+    assert await is_healthy() is False
+
+
+@pytest.mark.asyncio
+async def test_unhealthy_when_judge0_does_not_answer_in_time(monkeypatch) -> None:
+    async def hang(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(1)
+        return httpx.Response(201, json={"status": {"id": 3}})
+
+    monkeypatch.setattr(judge0, "HEALTH_CHECK_TIMEOUT_S", 0.01)
+    fix_judge0(monkeypatch, hang)
+
+    assert await is_healthy() is False
