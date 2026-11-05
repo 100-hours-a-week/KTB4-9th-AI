@@ -28,6 +28,9 @@ JUDGE0_URL = _settings.judge0_url
 # run_code는 wait=true라 큐 대기, 컴파일, 실행을 모두 포함한다.
 REQUEST_TIMEOUT_S = 60.0
 
+# 헬스 체크 제출의 타임아웃. 생성을 시작하기 전에 부르므로 오래 붙잡지 않는다.
+HEALTH_CHECK_TIMEOUT_S = 10.0
+
 LANGUAGE_TO_ID = {
     Language.JAVA: 62,
     Language.CPP: 54,
@@ -54,6 +57,11 @@ _STATUS = {
     6: ExecutionStatus.COMPILE_ERROR,
     **{status_id: ExecutionStatus.RUNTIME_ERROR for status_id in range(7, 13)},
 }
+
+
+_HEALTH_CHECK_LIMIT = ExecutionLimit(
+    language=Language.PYTHON, time_limit_ms=2000, memory_limit_kb=262144
+)
 
 
 class RunResult(BaseModel):
@@ -187,6 +195,27 @@ async def run_code(
         return RunResult(
             status=ExecutionStatus.INTERNAL_ERROR, stderr=f"judge0 실행 실패: {error!r}"
         )
+
+
+async def is_healthy() -> bool:
+    """
+    judge0가 지금 코드를 실행할 수 있는지 확인한다.
+
+    /about은 API 서버만 확인하고 /workers는 워커가 일을 해도 0으로 나올 수 있어
+    작은 코드를 실제로 제출해 본다. 예외를 올리지 않는다.
+
+    Returns:
+        bool: 제한 시간 안에 실행에 성공했으면 True
+    """
+    try:
+        async with asyncio.timeout(HEALTH_CHECK_TIMEOUT_S):
+            result = await run_code(
+                "print(1)", Language.PYTHON, "", _HEALTH_CHECK_LIMIT
+            )
+    except TimeoutError:
+        logger.warning("judge0 헬스 체크 시간 초과")
+        return False
+    return result.succeeded
 
 
 async def run_batch(

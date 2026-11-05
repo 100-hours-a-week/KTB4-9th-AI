@@ -45,6 +45,13 @@ class ProblemSaveError(CosmosError):
     """확정된 문제를 저장할 수 없다."""
 
 
+class JudgeUnavailableError(CosmosError):
+    """채점 서버가 코드를 실행할 수 없어 문제 생성을 시작하지 않았다."""
+
+    code = ErrorCode.JUDGE_UNAVAILABLE
+    status = 503
+
+
 class UnauthorizedError(CosmosError):
     """관리자 토큰이 없거나 맞지 않는다."""
 
