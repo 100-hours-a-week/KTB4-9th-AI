@@ -82,5 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-          docker build --pull -f dockerfile -t "${image}" .
+          # 증명 manifest를 만들지 않는다. ECR 푸시 역할에 BatchGetImage가 없어 manifest list 푸시가 403으로 실패하고,
+          # 기본 스캔도 단일 이미지 manifest에서만 동작한다.
+          docker build --pull --provenance=false --sbom=false -f dockerfile -t "${image}" .
           docker push "${image}"
