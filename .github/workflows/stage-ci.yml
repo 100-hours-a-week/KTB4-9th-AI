@@ -1,15 +1,16 @@
 name: Stage AI CI
 
+# stage에 병합된 커밋만 ECR에 올린다. ECR 스캔이 끝나면 EventBridge가 Cloud 저장소 eks-promote를 호출해
+# 훈련 클러스터 values PR을 연다.
 on:
-  pull_request:
+  push:
     branches: [stage]
-    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ai-stage-ci-pr-${{ github.event.pull_request.number }}
+  group: ai-stage-ci-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -24,12 +25,11 @@ jobs:
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-      IMAGE_TAG: ${{ github.event.pull_request.head.sha }}
+      IMAGE_TAG: ${{ github.sha }}
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
       - name: Verify publish configuration
@@ -82,5 +82,7 @@ jobs:
         run: |
           set -euo pipefail
           image="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-          docker build --pull -f dockerfile -t "${image}" .
+          # 증명 manifest를 만들지 않는다. ECR 푸시 역할에 BatchGetImage가 없어 manifest list 푸시가 403으로 실패하고,
+          # 기본 스캔도 단일 이미지 manifest에서만 동작한다.
+          docker build --pull --provenance=false --sbom=false -f dockerfile -t "${image}" .
           docker push "${image}"
