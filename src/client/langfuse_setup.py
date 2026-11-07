@@ -15,7 +15,8 @@ from src.problem.battle.nodes import (
     PROMPT_VERSION as V_BATTLE,
 )
 from src.problem.evaluation import (
-    EVALUATE_PROMPT,
+    EVALUATE_SYSTEM_PROMPT,
+    EVALUATE_USER_PROMPT,
 )
 from src.problem.evaluation import (
     PROMPT_VERSION as V_EVAL,
@@ -118,8 +119,14 @@ COSMOS_PROMPTS: list[tuple[str, str, str, str]] = [
     (
         "evaluate_nl_solution",
         V_EVAL,
-        EVALUATE_PROMPT,
-        "사용자 자연어 풀이 채점 프롬프트",
+        EVALUATE_SYSTEM_PROMPT,
+        "사용자 자연어 풀이 채점 규칙 (system 메시지)",
+    ),
+    (
+        "evaluate_nl_solution_user",
+        V_EVAL,
+        EVALUATE_USER_PROMPT,
+        "사용자 자연어 풀이 채점 입력 (user 메시지)",
     ),
 ]
 
