@@ -238,7 +238,7 @@ def build_chat_model(cfg: LLMConfig) -> ChatGoogleGenerativeAI:
 
 
 async def call_llm_structured[T: BaseModel](
-    prompt: str, cfg: LLMConfig, schema: type[T]
+    prompt: str, cfg: LLMConfig, schema: type[T], system: str | None = None
 ) -> T:
     """
     응답 형식을 지정해 Gemini를 호출하고 그 형식의 객체로 반환한다.
@@ -251,6 +251,7 @@ async def call_llm_structured[T: BaseModel](
         prompt (str): 완성된 프롬프트
         cfg (LLMConfig): 모델 설정
         schema (type[T]): 응답 형식을 정의한 Pydantic 클래스
+        system (str | None): system 메시지로 보낼 규칙. 없으면 user 메시지만 보낸다
 
     Returns:
         T: schema 형식으로 검증된 응답 객체
@@ -261,11 +262,13 @@ async def call_llm_structured[T: BaseModel](
     with langfuse_prompt_context(cfg.prompt_version):
         local = _local_model.get()
         if local is not None:
-            return await call_local_structured(prompt, local, schema)
+            return await call_local_structured(prompt, local, schema, system)
 
         structured = build_chat_model(cfg).with_structured_output(schema)
+        # system 메시지는 LangChain이 Gemini의 system_instruction로 보낸다
+        messages = [("system", system), ("human", prompt)] if system else prompt
         try:
-            result = await structured.ainvoke(prompt)
+            result = await structured.ainvoke(messages)
         except (OutputParserException, ValueError) as error:
             raise LLMOutputParseError(f"구조화 응답 해석 실패: {error}") from error
 
@@ -306,18 +309,19 @@ def get_local_client() -> AsyncOpenAI:
 
 
 async def call_local_structured[T: BaseModel](
-    prompt: str, model: LocalModel, schema: type[T]
+    prompt: str, model: LocalModel, schema: type[T], system: str | None = None
 ) -> T:
     """
     로컬 모델 서버에 응답 형식을 지정해 요청하고 그 형식의 객체로 반환한다.
 
-    Gemini 경로와 같은 프롬프트를 user 메시지 하나로 보낸다.
+    Gemini 경로와 같은 프롬프트를 user 메시지로 보낸다. system이 있으면 앞에 붙인다.
     response_format은 출력 형식만 강제하고 모델에게 스키마를 보여 주지는 않는다.
 
     Parameters:
         prompt (str): 완성된 프롬프트
         model (LocalModel): 요청을 받을 모델
         schema (type[T]): 응답 형식을 정의한 Pydantic 클래스
+        system (str | None): system 메시지로 보낼 규칙. 없으면 user 메시지만 보낸다
 
     Returns:
         T: schema 형식으로 검증된 응답 객체
@@ -331,9 +335,13 @@ async def call_local_structured[T: BaseModel](
     if model.chat_template_kwargs:
         options["extra_body"] = {"chat_template_kwargs": model.chat_template_kwargs}
 
+    messages = [{"role": "user", "content": prompt}]
+    if system:
+        messages.insert(0, {"role": "system", "content": system})
+
     response = await get_local_client().chat.completions.create(
         model=model.model_name,
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         response_format={
             "type": "json_schema",
             "json_schema": {
