@@ -28,7 +28,7 @@ JUDGE0_URL = _settings.judge0_url
 # run_code는 wait=true라 컴파일, 실행을 모두 포함한다.
 REQUEST_TIMEOUT_S = 60.0
 
-# 워커 조회와 제출을 합친 헬스 체크 전체의 타임아웃
+# 워커 조회와 두 경로 실행을 합친 헬스 체크 전체의 타임아웃
 HEALTH_CHECK_TIMEOUT_S = 10.0
 
 LANGUAGE_TO_ID = {
@@ -174,6 +174,16 @@ async def _poll_batch(client: httpx.AsyncClient, tokens: list[str]) -> dict[str,
     return finished
 
 
+async def _run_on_worker(client: httpx.AsyncClient, payload: dict) -> RunResult:
+    """제출 하나를 워커에 맡기고(wait=false) 끝날 때까지 기다려 결과를 받는다."""
+    token = await _submit(client, payload)
+    finished = await _poll_batch(client, [token])
+    if token not in finished:
+        raise TimeoutError("워커 실행 대기 시간 초과")
+
+    return _to_result(finished[token])
+
+
 async def run_code(
     code: str, language: Language, stdin: str, limit: ExecutionLimit
 ) -> RunResult:
@@ -272,27 +282,36 @@ async def is_healthy() -> bool:
     judge0가 지금 코드를 실행할 수 있는지 확인한다.
 
     run_code의 wait=true 제출은 API 서버가 바로 실행하고,
-    run_batch의 wait=false 제출은 워커가 실행한다.
-    그래서 워커 수와 실제 실행을 둘 다 본다.
+    run_batch의 wait=false 제출은 워커가 실행한다. 그래서 두 경로를 모두 실행해 본다.
+    /workers의 available은 Redis에 등록된 워커 수라서,
+    비정상 종료한 워커도 heartbeat가 끊기고 약 5분이 지날 때까지 남는다.
+    워커가 0이면 바로 실패하는 데만 쓴다.
     예외를 올리지 않는다.
 
     Returns:
-        bool: 제한 시간 안에 실행에 성공했으면 True
+        bool: 제한 시간 안에 두 경로 모두 실행에 성공했으면 True
     """
+    payload = _build_payload("print(1)", Language.PYTHON, "", _HEALTH_CHECK_LIMIT)
+
     try:
         async with asyncio.timeout(HEALTH_CHECK_TIMEOUT_S), _new_client() as client:
             if await _count_available_workers(client) == 0:
                 logger.warning("judge0 헬스 체크 실패: 사용 가능한 워커 없음")
                 return False
-            result = await _submit_and_wait(
-                client,
-                _build_payload("print(1)", Language.PYTHON, "", _HEALTH_CHECK_LIMIT),
-            )
+            for where, run in (
+                ("API 서버", _submit_and_wait),
+                ("워커", _run_on_worker),
+            ):
+                result = await run(client, payload)
+                if not result.succeeded:
+                    logger.warning(
+                        "judge0 헬스 체크 실패(%s): %s %s",
+                        where,
+                        result.status,
+                        result.stderr,
+                    )
+                    return False
     except (TimeoutError, httpx.HTTPError, ValueError) as error:
         logger.warning("judge0 헬스 체크 실패: %r", error)
-        return False
-
-    if not result.succeeded:
-        logger.warning("judge0 헬스 체크 실패: %s %s", result.status, result.stderr)
         return False
     return True
