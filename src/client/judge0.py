@@ -25,10 +25,10 @@ _settings = get_settings()
 JUDGE0_URL = _settings.judge0_url
 
 # HTTP 요청 하나의 타임아웃.
-# run_code는 wait=true라 큐 대기, 컴파일, 실행을 모두 포함한다.
+# run_code는 wait=true라 컴파일, 실행을 모두 포함한다.
 REQUEST_TIMEOUT_S = 60.0
 
-# 헬스 체크 제출의 타임아웃. 생성을 시작하기 전에 부르므로 오래 붙잡지 않는다.
+# 워커 조회와 제출을 합친 헬스 체크 전체의 타임아웃
 HEALTH_CHECK_TIMEOUT_S = 10.0
 
 LANGUAGE_TO_ID = {
@@ -202,27 +202,6 @@ async def run_code(
         )
 
 
-async def is_healthy() -> bool:
-    """
-    judge0가 지금 코드를 실행할 수 있는지 확인한다.
-
-    /about은 API 서버만 확인하고 /workers는 워커가 일을 해도 0으로 나올 수 있어
-    작은 코드를 실제로 제출해 본다. 예외를 올리지 않는다.
-
-    Returns:
-        bool: 제한 시간 안에 실행에 성공했으면 True
-    """
-    try:
-        async with asyncio.timeout(HEALTH_CHECK_TIMEOUT_S):
-            result = await run_code(
-                "print(1)", Language.PYTHON, "", _HEALTH_CHECK_LIMIT
-            )
-    except TimeoutError:
-        logger.warning("judge0 헬스 체크 시간 초과")
-        return False
-    return result.succeeded
-
-
 async def run_batch(
     code: str, language: Language, stdins: list[str], limit: ExecutionLimit
 ) -> list[RunResult]:
@@ -275,3 +254,45 @@ async def run_batch(
         )
         for token in tokens
     ]
+
+
+async def _count_available_workers(client: httpx.AsyncClient) -> int:
+    """GET /workers에서 모든 큐의 available 합을 센다."""
+    response = await client.get("/workers")
+    response.raise_for_status()
+    body = response.json()
+    if not isinstance(body, list):
+        raise ValueError(f"워커 목록이 아님: {response.text[:200]}")
+
+    return sum(item.get("available", 0) for item in body)
+
+
+async def is_healthy() -> bool:
+    """
+    judge0가 지금 코드를 실행할 수 있는지 확인한다.
+
+    run_code의 wait=true 제출은 API 서버가 바로 실행하고,
+    run_batch의 wait=false 제출은 워커가 실행한다.
+    그래서 워커 수와 실제 실행을 둘 다 본다.
+    예외를 올리지 않는다.
+
+    Returns:
+        bool: 제한 시간 안에 실행에 성공했으면 True
+    """
+    try:
+        async with asyncio.timeout(HEALTH_CHECK_TIMEOUT_S), _new_client() as client:
+            if await _count_available_workers(client) == 0:
+                logger.warning("judge0 헬스 체크 실패: 사용 가능한 워커 없음")
+                return False
+            result = await _submit_and_wait(
+                client,
+                _build_payload("print(1)", Language.PYTHON, "", _HEALTH_CHECK_LIMIT),
+            )
+    except (TimeoutError, httpx.HTTPError, ValueError) as error:
+        logger.warning("judge0 헬스 체크 실패: %r", error)
+        return False
+
+    if not result.succeeded:
+        logger.warning("judge0 헬스 체크 실패: %s %s", result.status, result.stderr)
+        return False
+    return True

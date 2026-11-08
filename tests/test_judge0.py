@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 import httpx
 import pytest
@@ -382,46 +383,160 @@ async def test_batch_skips_unknown_tokens_until_the_deadline(monkeypatch) -> Non
     assert results[0].status is ExecutionStatus.INTERNAL_ERROR
 
 
+WORKERS_UP = [{"queue": "1.13.1", "available": 4, "idle": 4, "working": 0, "paused": 0}]
+
+
+def answer(status: int, body):
+    return lambda request: httpx.Response(status, json=body)
+
+
+def health(workers=None, submission=None):
+    """
+    헬스 체크가 보내는 두 요청에 경로별로 답한다. 넘기지 않은 쪽은 정상으로 답한다.
+
+    Parameters:
+        workers: GET /workers 응답을 만드는 handler
+        submission: POST /submissions 응답을 만드는 handler
+    """
+    workers = workers or answer(200, WORKERS_UP)
+    submission = submission or reply(3, stdout="1\n")
+
+    def handle(request: httpx.Request):
+        if request.url.path == "/workers":
+            return workers(request)
+        return submission(request)
+
+    return handle
+
+
+def refuse(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("refused", request=request)
+
+
+def health_logs(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.name == judge0.__name__]
+
+
 @pytest.mark.asyncio
-async def test_healthy_when_code_actually_runs(monkeypatch) -> None:
-    requests = fix_judge0(monkeypatch, reply(3, stdout="1\n"))
+async def test_healthy_when_workers_are_up_and_code_runs(monkeypatch) -> None:
+    requests = fix_judge0(monkeypatch, health())
 
     assert await is_healthy() is True
-    assert requests[0].url.params["wait"] == "true"
+    assert [request.url.path for request in requests] == ["/workers", "/submissions"]
+    # wait=true는 API 서버가 바로 실행하므로 샌드박스까지 확인된다
+    assert requests[1].url.params["wait"] == "true"
 
 
 @pytest.mark.asyncio
-async def test_unhealthy_when_sandbox_fails(monkeypatch) -> None:
-    # API 서버는 살아 있어도 13(Internal Error)이면 코드를 실행하지 못한 것이다
-    fix_judge0(monkeypatch, reply(13, message="sandbox failed"))
+async def test_no_available_worker_fails_without_submitting(monkeypatch) -> None:
+    # wait=true 제출은 워커 없이도 성공하므로 워커 수를 따로 봐야 한다
+    requests = fix_judge0(monkeypatch, health(workers=answer(200, [{"available": 0}])))
+
+    assert await is_healthy() is False
+    assert [request.url.path for request in requests] == ["/workers"]
+
+
+@pytest.mark.asyncio
+async def test_workers_are_summed_across_queues(monkeypatch) -> None:
+    queues = [{"queue": "a", "available": 0}, {"queue": "b", "available": 2}]
+    fix_judge0(monkeypatch, health(workers=answer(200, queues)))
+
+    assert await is_healthy() is True
+
+
+@pytest.mark.asyncio
+async def test_queue_without_available_field_counts_as_no_worker(monkeypatch) -> None:
+    fix_judge0(monkeypatch, health(workers=answer(200, [{"queue": "1.13.1"}])))
 
     assert await is_healthy() is False
 
 
 @pytest.mark.asyncio
-async def test_unhealthy_on_server_error(monkeypatch) -> None:
-    fix_judge0(monkeypatch, lambda request: httpx.Response(503))
+async def test_workers_answer_that_is_not_a_list_fails(monkeypatch) -> None:
+    fix_judge0(monkeypatch, health(workers=answer(200, {"error": "unauthorized"})))
 
     assert await is_healthy() is False
 
 
 @pytest.mark.asyncio
-async def test_unhealthy_when_connection_fails(monkeypatch) -> None:
-    def refuse(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("refused", request=request)
+async def test_workers_endpoint_error_fails_without_submitting(monkeypatch) -> None:
+    requests = fix_judge0(monkeypatch, health(workers=answer(503, {})))
 
+    assert await is_healthy() is False
+    assert [request.url.path for request in requests] == ["/workers"]
+
+
+@pytest.mark.asyncio
+async def test_sandbox_failure_fails_even_with_workers(monkeypatch) -> None:
+    # 워커가 떠 있어도 13(Internal Error)이면 코드를 실행하지 못한 것이다
+    fix_judge0(monkeypatch, health(submission=reply(13, message="sandbox failed")))
+
+    assert await is_healthy() is False
+
+
+@pytest.mark.asyncio
+async def test_submission_server_error_fails(monkeypatch) -> None:
+    fix_judge0(monkeypatch, health(submission=answer(500, {})))
+
+    assert await is_healthy() is False
+
+
+@pytest.mark.asyncio
+async def test_connection_failure_fails(monkeypatch) -> None:
     fix_judge0(monkeypatch, refuse)
 
     assert await is_healthy() is False
 
 
 @pytest.mark.asyncio
-async def test_unhealthy_when_judge0_does_not_answer_in_time(monkeypatch) -> None:
-    async def hang(request: httpx.Request) -> httpx.Response:
-        await asyncio.sleep(1)
+async def test_timeout_covers_workers_and_submission_together(monkeypatch) -> None:
+    # 요청 하나하나는 제한 안에 끝나도 합치면 넘는다
+    async def slow_workers(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.15)
+        return httpx.Response(200, json=WORKERS_UP)
+
+    async def slow_submission(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.15)
         return httpx.Response(201, json={"status": {"id": 3}})
 
-    monkeypatch.setattr(judge0, "HEALTH_CHECK_TIMEOUT_S", 0.01)
-    fix_judge0(monkeypatch, hang)
+    monkeypatch.setattr(judge0, "HEALTH_CHECK_TIMEOUT_S", 0.2)
+    fix_judge0(monkeypatch, health(slow_workers, slow_submission))
 
     assert await is_healthy() is False
+
+
+@pytest.mark.asyncio
+async def test_failure_is_logged_in_one_line_without_traceback(
+    monkeypatch, caplog
+) -> None:
+    fix_judge0(monkeypatch, refuse)
+
+    with caplog.at_level(logging.WARNING, logger=judge0.__name__):
+        await is_healthy()
+
+    [record] = health_logs(caplog)
+    assert record.levelno == logging.WARNING
+    assert record.exc_info is None
+    assert "ConnectError" in record.getMessage()
+
+
+@pytest.mark.asyncio
+async def test_failed_run_logs_its_status_and_reason(monkeypatch, caplog) -> None:
+    fix_judge0(monkeypatch, health(submission=reply(13, message="sandbox failed")))
+
+    with caplog.at_level(logging.WARNING, logger=judge0.__name__):
+        await is_healthy()
+
+    [record] = health_logs(caplog)
+    assert ExecutionStatus.INTERNAL_ERROR.value in record.getMessage()
+    assert "sandbox failed" in record.getMessage()
+
+
+@pytest.mark.asyncio
+async def test_healthy_check_logs_nothing(monkeypatch, caplog) -> None:
+    fix_judge0(monkeypatch, health())
+
+    with caplog.at_level(logging.DEBUG, logger=judge0.__name__):
+        await is_healthy()
+
+    assert health_logs(caplog) == []
