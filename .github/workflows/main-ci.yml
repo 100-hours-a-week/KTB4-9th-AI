@@ -1,0 +1,194 @@
+name: AI Main CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-main-ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-security:
+    name: Scan dependencies and secrets
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Scan repository with Trivy (SARIF)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          format: sarif
+          output: trivy-fs-ai.sarif
+          exit-code: "0"
+
+      - name: Upload repository scan to GitHub Security
+        if: >-
+          ${{ always() &&
+              (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-fs-ai.sarif
+          category: trivy-ai-filesystem
+
+      - name: Preserve repository scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-fs-ai-${{ github.run_id }}
+          path: trivy-fs-ai.sarif
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Block fixable critical repository vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+
+      - name: Block exposed secrets in repository
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          format: table
+          exit-code: "1"
+
+  image-security:
+    name: Build and scan main image
+    needs: repository-security
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-ci
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build image once
+        run: docker build --pull -f dockerfile -t ai-test:${{ github.sha }} .
+
+      - name: Scan built image with Trivy (SARIF)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ai-test:${{ github.sha }}
+          scanners: vuln,secret
+          format: sarif
+          output: trivy-image-ai.sarif
+          exit-code: "0"
+
+      - name: Upload image scan to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-image-ai.sarif
+          category: trivy-ai-image
+
+      - name: Preserve image scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-ai-${{ github.run_id }}
+          path: trivy-image-ai.sarif
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Block fixable critical image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ai-test:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+
+      - name: Block exposed secrets in image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ai-test:${{ github.sha }}
+          scanners: secret
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          format: table
+          exit-code: "1"
+
+      - name: Verify production publication configuration
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_PROD_CI_ROLE_ARN: ${{ vars.AWS_PROD_CI_ROLE_ARN }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          for name in AWS_REGION AWS_ACCOUNT_ID AWS_PROD_CI_ROLE_ARN ECR_REPOSITORY; do
+            [[ -n "${!name:-}" ]] || { echo "::error::Missing production-ci variable: ${name}"; exit 1; }
+          done
+          [[ "${ECR_REPOSITORY}" == "cosmos-v2/fastapi" ]] || { echo "::error::ECR_REPOSITORY must be cosmos-v2/fastapi"; exit 1; }
+
+      - name: Configure production AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_PROD_CI_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create Cloud repository token
+        id: cloud-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CLOUD_GITHUB_APP_ID }}
+          private-key: ${{ secrets.CLOUD_GITHUB_APP_PRIVATE_KEY }}
+          owner: 100-hours-a-week
+          repositories: KTB4-9th-Cloud
+
+      - name: Publish immutable image and request GitOps promotion
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+          LOCAL_IMAGE: ai-test:${{ github.sha }}
+          COMPONENT: fastapi
+          SOURCE_REPOSITORY: cosmos-v2/fastapi
+          SOURCE_REPO_SLUG: 100-hours-a-week/KTB4-9th-AI
+          CLOUD_REPOSITORY: 100-hours-a-week/KTB4-9th-Cloud
+          GH_TOKEN: ${{ steps.cloud-token.outputs.token }}
+        run: bash .github/scripts/publish-main-image.sh
