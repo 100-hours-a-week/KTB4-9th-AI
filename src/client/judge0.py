@@ -130,6 +130,17 @@ async def _submit(client: httpx.AsyncClient, payload: dict) -> str:
     return token
 
 
+async def _submit_and_wait(client: httpx.AsyncClient, payload: dict) -> RunResult:
+    """제출 하나를 결과가 나올 때까지 기다려(wait=true) 받는다."""
+    response = await client.post(
+        "/submissions",
+        params={"wait": "true", "base64_encoded": "false"},
+        json=payload,
+    )
+    response.raise_for_status()
+    return _to_result(response.json())
+
+
 async def _poll_batch(client: httpx.AsyncClient, tokens: list[str]) -> dict[str, dict]:
     """
     제출 결과를 모두 끝나거나 대기 한도를 넘길 때까지 한 번에 모아 조회한다.
@@ -183,13 +194,7 @@ async def run_code(
     payload = _build_payload(code, language, stdin, limit)
     try:
         async with _new_client() as client:
-            response = await client.post(
-                "/submissions",
-                params={"wait": "true", "base64_encoded": "false"},
-                json=payload,
-            )
-            response.raise_for_status()
-            return _to_result(response.json())
+            return await _submit_and_wait(client, payload)
     except (httpx.HTTPError, ValueError) as error:
         logger.warning("judge0 실행 실패: %r", error, exc_info=True)
         return RunResult(
