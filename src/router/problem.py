@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from src.client.judge0 import is_healthy
 from src.core.enums import Trigger
@@ -8,6 +8,7 @@ from src.problem.battle.state import BattleState
 from src.problem.daily import generate_daily_problems
 from src.problem.graph import get_graph
 from src.problem.nodes.finalize import build_problem
+from src.problem.on_demand import mark_delivered, save_undelivered
 from src.problem.state import GraphState
 from src.schema.problem import (
     BattleProblemResponse,
@@ -29,8 +30,15 @@ async def ensure_judge0_healthy() -> None:
 
 
 @router.post("/api/llm/problem")
-async def make_problem(request: ProblemRequest) -> ProblemResponse:
-    """문제 하나를 생성한다. 검증에서 걸리면 폐기되고 502로 응답한다."""
+async def make_problem(
+    request: ProblemRequest, http_request: Request
+) -> ProblemResponse:
+    """
+    문제 하나를 생성한다. 검증에서 걸리면 폐기되고 502로 응답한다.
+
+    생성 중에 Spring이 연결을 끊었으면 응답이 닿지 않으므로
+    만든 문제를 Spring 저장 API로 따로 보낸다.
+    """
     await ensure_judge0_healthy()
 
     state = GraphState(
@@ -45,7 +53,13 @@ async def make_problem(request: ProblemRequest) -> ProblemResponse:
             f"({result.discard_stage}: {result.discard_reason})"
         )
 
-    return ProblemResponse(problem=build_problem(result))
+    problem = build_problem(result)
+    if await http_request.is_disconnected():
+        await save_undelivered(result.problem_id, problem)
+    else:
+        await mark_delivered(result.problem_id)
+
+    return ProblemResponse(problem=problem)
 
 
 @router.post("/api/llm/problem/daily")
