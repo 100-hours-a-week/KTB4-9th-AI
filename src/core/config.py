@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # 관리자 API 인증 토큰. 비어 있으면 관리자 API를 전부 거절한다
     admin_token: SecretStr | None = None
 
+    # Langfuse (LLM 관측성 및 프롬프트 트레이싱).
+    # 비어 있으면 트레이스 수집을 건너뛰고 정상 동작한다.
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_host: str = "https://jp.cloud.langfuse.com"
+
     backend_url: str = "http://localhost:8080"
 
     judge0_url: str = "http://localhost:2358"
@@ -73,6 +79,10 @@ class Settings(BaseSettings):
     batch_concurrency: int = 5
 
     log_level: str = "INFO"
+
+    # AWS SSM Parameter Store 모델 버전 설정 (Dev: us-west-2, Prod: ap-northeast-2)
+    ssm_model_version_param: str | None = None
+    aws_region: str | None = None
 
 
 @lru_cache

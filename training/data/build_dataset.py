@@ -28,6 +28,9 @@ FEW_SHOT_COUNT = 1
 VAL_RATIO = 0.1
 SEED = 42
 
+# convert.py가 붙이는 원본 이름. 정답 JSON에 들어가면 안 된다
+SOURCE_NAME_KEY = "source_name"
+
 # few-shot으로 넘길 때 쓰는 필드. render_few_shot이 이 네 개만 읽는다.
 FEW_SHOT_FIELDS = (
     "problem_title",
@@ -37,10 +40,13 @@ FEW_SHOT_FIELDS = (
 )
 
 
-def load_problems() -> list[dict]:
-    """변환 결과를 읽는다."""
-    lines = INPUT_PATH.read_text(encoding="utf-8").strip().split("\n")
-    return [json.loads(line) for line in lines]
+def load_problems(path: Path) -> list[dict]:
+    """변환 결과를 읽는다. 모델이 따라 쓰지 않도록 원본 이름은 뺀다."""
+    lines = path.read_text(encoding="utf-8").strip().split("\n")
+    problems = [json.loads(line) for line in lines]
+    for problem in problems:
+        problem.pop(SOURCE_NAME_KEY, None)
+    return problems
 
 
 def group_by_key(problems: list[dict]) -> dict[tuple, list[dict]]:
@@ -95,22 +101,25 @@ def write_jsonl(path: Path, samples: list[dict]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="학습용 jsonl 생성")
     parser.add_argument("--val-ratio", type=float, default=VAL_RATIO)
+    parser.add_argument("--input", type=Path, default=INPUT_PATH, help="변환본 경로")
+    parser.add_argument("--train", type=Path, default=TRAIN_PATH, help="학습 출력 경로")
+    parser.add_argument("--val", type=Path, default=VAL_PATH, help="검증 출력 경로")
     args = parser.parse_args()
 
     random.seed(SEED)
 
-    problems = load_problems()
+    problems = load_problems(args.input)
     train_problems, val_problems = split(problems, args.val_ratio)
     groups = group_by_key(train_problems)
 
     train = [to_sample(problem, groups) for problem in train_problems]
     val = [to_sample(problem, groups) for problem in val_problems]
 
-    write_jsonl(TRAIN_PATH, train)
-    write_jsonl(VAL_PATH, val)
+    write_jsonl(args.train, train)
+    write_jsonl(args.val, val)
 
-    logger.info("학습 %d건 → %s", len(train), TRAIN_PATH)
-    logger.info("검증 %d건 → %s", len(val), VAL_PATH)
+    logger.info("학습 %d건 → %s", len(train), args.train)
+    logger.info("검증 %d건 → %s", len(val), args.val)
 
 
 if __name__ == "__main__":

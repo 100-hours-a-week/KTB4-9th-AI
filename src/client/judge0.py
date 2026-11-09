@@ -25,8 +25,11 @@ _settings = get_settings()
 JUDGE0_URL = _settings.judge0_url
 
 # HTTP 요청 하나의 타임아웃.
-# run_code는 wait=true라 큐 대기, 컴파일, 실행을 모두 포함한다.
+# run_code는 wait=true라 컴파일, 실행을 모두 포함한다.
 REQUEST_TIMEOUT_S = 60.0
+
+# 워커 조회와 두 경로 실행을 합친 헬스 체크 전체의 타임아웃
+HEALTH_CHECK_TIMEOUT_S = 10.0
 
 LANGUAGE_TO_ID = {
     Language.JAVA: 62,
@@ -54,6 +57,11 @@ _STATUS = {
     6: ExecutionStatus.COMPILE_ERROR,
     **{status_id: ExecutionStatus.RUNTIME_ERROR for status_id in range(7, 13)},
 }
+
+
+_HEALTH_CHECK_LIMIT = ExecutionLimit(
+    language=Language.PYTHON, time_limit_ms=2000, memory_limit_kb=262144
+)
 
 
 class RunResult(BaseModel):
@@ -122,6 +130,17 @@ async def _submit(client: httpx.AsyncClient, payload: dict) -> str:
     return token
 
 
+async def _submit_and_wait(client: httpx.AsyncClient, payload: dict) -> RunResult:
+    """제출 하나를 결과가 나올 때까지 기다려(wait=true) 받는다."""
+    response = await client.post(
+        "/submissions",
+        params={"wait": "true", "base64_encoded": "false"},
+        json=payload,
+    )
+    response.raise_for_status()
+    return _to_result(response.json())
+
+
 async def _poll_batch(client: httpx.AsyncClient, tokens: list[str]) -> dict[str, dict]:
     """
     제출 결과를 모두 끝나거나 대기 한도를 넘길 때까지 한 번에 모아 조회한다.
@@ -155,6 +174,16 @@ async def _poll_batch(client: httpx.AsyncClient, tokens: list[str]) -> dict[str,
     return finished
 
 
+async def _run_on_worker(client: httpx.AsyncClient, payload: dict) -> RunResult:
+    """제출 하나를 워커에 맡기고(wait=false) 끝날 때까지 기다려 결과를 받는다."""
+    token = await _submit(client, payload)
+    finished = await _poll_batch(client, [token])
+    if token not in finished:
+        raise TimeoutError("워커 실행 대기 시간 초과")
+
+    return _to_result(finished[token])
+
+
 async def run_code(
     code: str, language: Language, stdin: str, limit: ExecutionLimit
 ) -> RunResult:
@@ -175,13 +204,7 @@ async def run_code(
     payload = _build_payload(code, language, stdin, limit)
     try:
         async with _new_client() as client:
-            response = await client.post(
-                "/submissions",
-                params={"wait": "true", "base64_encoded": "false"},
-                json=payload,
-            )
-            response.raise_for_status()
-            return _to_result(response.json())
+            return await _submit_and_wait(client, payload)
     except (httpx.HTTPError, ValueError) as error:
         logger.warning("judge0 실행 실패: %r", error, exc_info=True)
         return RunResult(
@@ -241,3 +264,54 @@ async def run_batch(
         )
         for token in tokens
     ]
+
+
+async def _count_available_workers(client: httpx.AsyncClient) -> int:
+    """GET /workers에서 모든 큐의 available 합을 센다."""
+    response = await client.get("/workers")
+    response.raise_for_status()
+    body = response.json()
+    if not isinstance(body, list):
+        raise ValueError(f"워커 목록이 아님: {response.text[:200]}")
+
+    return sum(item.get("available", 0) for item in body)
+
+
+async def is_healthy() -> bool:
+    """
+    judge0가 지금 코드를 실행할 수 있는지 확인한다.
+
+    run_code의 wait=true 제출은 API 서버가 바로 실행하고,
+    run_batch의 wait=false 제출은 워커가 실행한다. 그래서 두 경로를 모두 실행해 본다.
+    /workers의 available은 Redis에 등록된 워커 수라서,
+    비정상 종료한 워커도 heartbeat가 끊기고 약 5분이 지날 때까지 남는다.
+    워커가 0이면 바로 실패하는 데만 쓴다.
+    예외를 올리지 않는다.
+
+    Returns:
+        bool: 제한 시간 안에 두 경로 모두 실행에 성공했으면 True
+    """
+    payload = _build_payload("print(1)", Language.PYTHON, "", _HEALTH_CHECK_LIMIT)
+
+    try:
+        async with asyncio.timeout(HEALTH_CHECK_TIMEOUT_S), _new_client() as client:
+            if await _count_available_workers(client) == 0:
+                logger.warning("judge0 헬스 체크 실패: 사용 가능한 워커 없음")
+                return False
+            for where, run in (
+                ("API 서버", _submit_and_wait),
+                ("워커", _run_on_worker),
+            ):
+                result = await run(client, payload)
+                if not result.succeeded:
+                    logger.warning(
+                        "judge0 헬스 체크 실패(%s): %s %s",
+                        where,
+                        result.status,
+                        result.stderr,
+                    )
+                    return False
+    except (TimeoutError, httpx.HTTPError, ValueError) as error:
+        logger.warning("judge0 헬스 체크 실패: %r", error)
+        return False
+    return True

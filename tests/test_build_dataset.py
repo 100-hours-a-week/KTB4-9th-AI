@@ -34,7 +34,7 @@ def run_main(monkeypatch, tmp_path):
         train_path = tmp_path / f"train_{seed}.jsonl"
         val_path = tmp_path / f"val_{seed}.jsonl"
 
-        monkeypatch.setattr(build_dataset, "load_problems", lambda: problems)
+        monkeypatch.setattr(build_dataset, "load_problems", lambda _path: problems)
         monkeypatch.setattr(build_dataset, "TRAIN_PATH", train_path)
         monkeypatch.setattr(build_dataset, "VAL_PATH", val_path)
         monkeypatch.setattr(build_dataset, "SEED", seed)
@@ -61,6 +61,16 @@ def test_검증용_문제가_어떤_프롬프트에도_참고_문제로_들어�
         for content in val_contents:
             for prompt in prompts:
                 assert content not in prompt, f"seed={seed}"
+
+
+def test_원본_이름은_정답에_들어가지_않는다(tmp_path):
+    path = tmp_path / "converted.jsonl"
+    problem = {"source_name": "1012_E. Cycle sort", **make_problems(1)[0]}
+    path.write_text(json.dumps(problem, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    loaded = build_dataset.load_problems(path)
+
+    assert loaded == make_problems(1)
 
 
 def test_참고_문제로_자기_자신이_들어가지_않는다(run_main):

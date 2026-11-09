@@ -347,7 +347,7 @@ class FakeLocal:
         self.outcomes = list(outcomes)
         self.models: list[LocalModel] = []
 
-    async def __call__(self, prompt, model, schema):
+    async def __call__(self, prompt, model, schema, system=None):
         self.models.append(model)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):

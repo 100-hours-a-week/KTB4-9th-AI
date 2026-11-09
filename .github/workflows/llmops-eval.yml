@@ -3,23 +3,45 @@ name: LLMOps Evaluation & Release
 on:
   workflow_dispatch:
     inputs:
+      pipeline_mode:
+        description: "실행 모드 (evaluate_only: 모델 평가, train_and_evaluate: 학습 후 연속 평가, train_only: 학습 단독 테스트)"
+        required: true
+        default: "evaluate_only"
+        type: choice
+        options:
+          - evaluate_only
+          - train_and_evaluate
+          - train_only
+      target_env:
+        description: "승격 대상 환경 (dev: 오레곤 EC2, prod: 서울 ECS)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
       track_type:
         description: "평가 유형 선택 (비학습 베이스 모델 vs 파인튜닝 학습 모델)"
         required: true
+        default: "base_model"
         type: choice
         options:
           - base_model
           - trained_model
       model_id:
-        description: "평가 및 운영 배포할 모델 ID"
+        description: "베이스 모델 ID (예: Qwen/Qwen3.5-27B, Qwen/Qwen3.5-122B-A10B-FP8)"
         required: true
         default: "Qwen/Qwen3.5-122B-A10B-FP8"
+      lora_adapter_id:
+        description: "LoRA 어댑터 HF 레포지토리 ID (학습 후 업로드할 경로 또는 평가할 어댑터 ID, 베이스 단독 평가 시 비움)"
+        required: false
+        default: ""
       prompt_version:
         description: "프롬프트 버전"
         required: false
         default: "generate_problem/v11"
       gpu_type:
-        description: "추론에 사용할 GPU 기종 선택"
+        description: "추론(및 서버리스 학습)에 사용할 GPU 기종 선택"
         required: false
         default: "H200"
         type: choice
@@ -28,12 +50,25 @@ on:
           - B200
           - 2xA100
           - A100
-          - L4
           - L40S
+          - L4
+          - T4
       limit:
         description: "평가할 요청 건수 (0이면 72건 전체, 스모크 테스트 시 4건 등)"
         required: false
         default: "0"
+      concurrency:
+        description: "동시에 생성할 문제 수 (H200 기준 12 권장)"
+        required: false
+        default: "12"
+      train_max_steps:
+        description: "[학습 모드 전용] 학습 최대 스텝 수 (-1이면 전체 에폭, 스모크 테스트 시 5 권장)"
+        required: false
+        default: "5"
+      dataset_source:
+        description: "[학습 모드 전용] 학습 데이터 경로 또는 HF 레포 (예: /workspace/data, /workspace/data/v3, hf:org/dataset-v3)"
+        required: false
+        default: "/workspace/data"
 
 permissions:
   contents: read
@@ -44,19 +79,132 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  evaluate:
-    name: Run AI Evaluation on Modal Serverless
+  train:
+    name: "[Optional] Run LoRA Fine-Tuning on Modal/RunPod"
+    if: inputs.pipeline_mode == 'train_only' || inputs.pipeline_mode == 'train_and_evaluate'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
 
     env:
-      LABEL: eval-${{ github.run_id }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       MODAL_GPU_TYPE: ${{ inputs.gpu_type }}
-      VLLM_URL: ${{ secrets.VLLM_URL }}
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI || 'https://mlflow.cosmoscode.site' }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      RUN_NAME: train-${{ github.run_id }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: |
+          uv sync --locked --group dev
+          uv pip install mlflow boto3 huggingface_hub huggingface_hub
+
+      - name: LoRA 파인튜닝 실행 (Modal GPU / training/train_sft.py)
+        run: |
+          echo "=================================================="
+          echo "LoRA 파인튜닝 실행 시작"
+          echo "- 베이스 모델: ${{ inputs.model_id }}"
+          echo "- GPU 기종: ${{ inputs.gpu_type }}"
+          echo "- 최대 스텝: ${{ inputs.train_max_steps }}"
+          echo "- 어댑터 HF 저장소: ${{ inputs.lora_adapter_id || '미지정(볼륨 저장)' }}"
+          echo "=================================================="
+          HF_OPT=""
+          if [ -n "${{ inputs.lora_adapter_id }}" ]; then
+            HF_OPT="--hf-repo-id ${{ inputs.lora_adapter_id }}"
+          fi
+
+          uv run --with modal modal run modal_train.py \
+            --model "${{ inputs.model_id }}" \
+            --run-name "${RUN_NAME}" \
+            --dataset-source "${{ inputs.dataset_source || '/workspace/data' }}" \
+            --max-steps "${{ inputs.train_max_steps }}" \
+            ${HF_OPT}
+
+      - name: Configure AWS credentials for S3 Backup
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_STAGE_CD_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-2
+
+      - name: MLflow, S3 및 GitHub Summary에 학습 메트릭 기록
+        run: |
+          uv run python .github/scripts/log_train_to_mlflow.py \
+            --run-dir "training/runs/${RUN_NAME}" \
+            --run-name "${RUN_NAME}"
+
+      - name: 학습 메타데이터 아티팩트 보관
+        uses: actions/upload-artifact@v4
+        with:
+          name: train-metadata-${{ env.RUN_NAME }}
+          path: training/runs/${{ env.RUN_NAME }}/
+
+  evaluate:
+    name: Run AI Evaluation on Modal Serverless
+    needs: [train]
+    if: always() && (inputs.pipeline_mode == 'evaluate_only' || (inputs.pipeline_mode == 'train_and_evaluate' && needs.train.result == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: cosmos
+          POSTGRES_USER: cosmos
+          POSTGRES_PASSWORD: cosmos_local_dev
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: cosmos
+      DB_PASSWORD: cosmos_local_dev
+      DB_NAME: cosmos
+      LABEL: eval-${{ github.run_id }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_APP_NAME: cosmos-vllm-eval
+      MODAL_GPU_TYPE: ${{ inputs.gpu_type }}
+      MODEL_ID: ${{ inputs.model_id }}
+      LORA_ADAPTER_ID: ${{ inputs.lora_adapter_id }}
+      LORA_ADAPTER_NAME: ${{ inputs.lora_adapter_id && 'trained-lora-adapter' || '' }}
+      VLLM_URL: ${{ secrets.VLLM_EVAL_URL || 'https://haram891--cosmos-vllm-eval-modelserver-serve.us-east.modal.run' }}
       VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      JUDGE0_URL: ${{ secrets.JUDGE0_URL || 'https://stage-judge.cosmoscode.site' }}
       LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
       LANGCHAIN_TRACING_V2: "true"
       LANGCHAIN_PROJECT: "cosmos-model-eval"
+      LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+      LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+      LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST || secrets.LANGFUSE_BASE_URL || 'https://jp.cloud.langfuse.com' }}
+      LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL || secrets.LANGFUSE_HOST || 'https://jp.cloud.langfuse.com' }}
       MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI || 'https://mlflow.cosmoscode.site' }}
       MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
@@ -79,8 +227,82 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --locked --group dev
-          # MLflow 기록을 위해 mlflow 패키지 추가 설치
-          uv pip install mlflow boto3
+          uv pip install mlflow boto3 huggingface_hub
+
+      - name: 0.2단계 - 로컬 DB 마이그레이션 및 Few-shot·Langfuse 리소스 동기화
+        run: |
+          echo "=================================================="
+          echo "로컬 PostgreSQL 스키마 마이그레이션 및 시드 적재"
+          echo "=================================================="
+          uv run alembic upgrade head
+          uv run python -m src.db.seed_fewshot
+          uv run python -m src.client.langfuse_setup
+
+      - name: 0단계 - Modal 서버리스 vLLM 인스턴스 배포 및 활성화 (동적 파라미터 튜닝)
+        run: |
+          echo "=================================================="
+          echo "Modal vLLM 서버리스 배포 시작 (평가 전용 인스턴스: ${MODAL_APP_NAME})"
+          echo "- 베이스 모델: ${MODEL_ID}"
+          echo "- LoRA 어댑터: ${LORA_ADAPTER_ID:-없음 (베이스 단독)}"
+          echo "- GPU 기종: ${MODAL_GPU_TYPE}"
+          echo "=================================================="
+          uv run --with modal modal deploy modal_serve.py
+
+      - name: 0.5단계 - vLLM 추론 엔드포인트 기동 상태 확인
+        run: |
+          echo "=================================================="
+          echo "vLLM 추론 엔드포인트 상태 확인 중..."
+          echo "=================================================="
+          # 끝 슬래시(/)와 /v1을 모두 안전하게 제거하여 더블 슬래시(//) 방지
+          BASE_ENDPOINT="${VLLM_URL%/}"
+          BASE_ENDPOINT="${BASE_ENDPOINT%/v1}"
+          BASE_ENDPOINT="${BASE_ENDPOINT%/}"
+          HEALTH_URL="${BASE_ENDPOINT}/v1/models"
+          echo "확인 대상 URL: ${HEALTH_URL}"
+
+          SUCCESS=0
+          for i in {1..40}; do
+            HTTP_CODE=$(curl -s -o /tmp/vllm_health_resp.txt -w "%{http_code}" \
+              -H "Authorization: Bearer ${VLLM_API_KEY}" \
+              --max-time 20 \
+              "${HEALTH_URL}" || true)
+
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "✅ vLLM 서버 준비 완료 (HTTP 200)"
+              cat /tmp/vllm_health_resp.txt || true
+              echo ""
+              SUCCESS=1
+              break
+            fi
+
+            echo "vLLM 서버 기동 대기 중 (시도 ${i}/40, 응답 코드: ${HTTP_CODE})... 10초 후 재시도"
+            if [ "${HTTP_CODE}" != "000" ] && [ -s /tmp/vllm_health_resp.txt ]; then
+              echo "  [응답 본문 요약]: $(head -c 300 /tmp/vllm_health_resp.txt)"
+            fi
+            if [ $((i % 2)) -eq 0 ]; then
+              timeout 8s uv run --with modal modal app logs "${MODAL_APP_NAME}" > /tmp/modal_eval.log 2>&1 || true
+              if [ -s /tmp/modal_eval.log ]; then
+                # 이전 실행의 과거 컨테이너 로그를 제외하고 가장 최근 컨테이너 기동 블록만 추출
+                awk '/\[vLLM Server\] 기동 시작:/{buf=""} {buf=buf $0 "\n"} END{printf "%s", buf}' /tmp/modal_eval.log > /tmp/modal_eval_latest.log
+                echo "  --- [Modal 컨테이너 실시간 진행 로그 (최근 8줄)] ---"
+                tail -n 8 /tmp/modal_eval_latest.log | sed 's/^/    /' || true
+                if grep -Eq "\[Fail-Fast\]|\[vLLM Fatal\]|1차 기동 및 안전 모드 재시도가 모두 실패" /tmp/modal_eval_latest.log; then
+                  echo "❌ Modal 컨테이너에서 치명적 기동 오류가 감지되어 대기를 즉시 중단합니다."
+                  break
+                fi
+              fi
+            fi
+            sleep 10
+          done
+
+          if [ "${SUCCESS}" -ne 1 ]; then
+            echo "❌ vLLM 서버 기동 확인 실패 (타임아웃). Modal 컨테이너 최신 로그를 덤프합니다:"
+            echo "--------------------------------------------------"
+            timeout 15s uv run --with modal modal app logs "${MODAL_APP_NAME}" > /tmp/modal_eval.log 2>&1 || true
+            tail -n 120 /tmp/modal_eval.log || true
+            echo "--------------------------------------------------"
+            exit 1
+          fi
 
       - name: 1단계 - AI 팀 평가기 실행 (evals.generate)
         run: |
@@ -89,38 +311,65 @@ jobs:
             LIMIT_OPT="--limit ${{ inputs.limit }}"
           fi
 
+          # LoRA 어댑터가 지정된 경우 어댑터 이름으로 추론 요청
+          EVAL_MODEL_NAME="${MODEL_ID}"
+          if [ -n "${LORA_ADAPTER_NAME}" ]; then
+            EVAL_MODEL_NAME="${LORA_ADAPTER_NAME}"
+          fi
+
           echo "=================================================="
-          echo "평가 1단계 (생성) 시작: 모델=${{ inputs.model_id }}"
+          echo "평가 1단계 (생성) 시작: 요청 모델=${EVAL_MODEL_NAME} (베이스=${MODEL_ID})"
           echo "=================================================="
 
           uv run python -m evals.generate \
             --label "${LABEL}" \
-            --model "${{ inputs.model_id }}" \
+            --model "${EVAL_MODEL_NAME}" \
             --chat-template-kwargs '{"enable_thinking": false}' \
+            --concurrency "${{ inputs.concurrency || '12' }}" \
             ${LIMIT_OPT}
 
       - name: 2단계 - AI 팀 평가기 채점 (evals.score)
         run: |
+          LIMIT_OPT=""
+          if [ "${{ inputs.limit }}" != "0" ]; then
+            LIMIT_OPT="--limit ${{ inputs.limit }}"
+          fi
+
           echo "=================================================="
           echo "평가 2단계 (채점 및 검증 재생) 시작"
           echo "=================================================="
-          uv run python -m evals.score --label "${LABEL}"
+          uv run python -m evals.score \
+            --label "${LABEL}" \
+            --concurrency 8 \
+            ${LIMIT_OPT}
 
       - name: 3단계 - 비교표 산출 (evals.summarize)
         run: |
           echo "=================================================="
           echo "평가 3단계 (비교표 요약) 시작"
           echo "=================================================="
-          uv run python -m evals.summarize --label "${LABEL}"
+          uv run python -m evals.summarize "${LABEL}" --out "evals/results/${LABEL}/summary.md"
 
-      - name: 4단계 - MLflow 및 S3에 메트릭 기록
+      - name: 4단계 - MLflow 및 S3에 메트릭 기록 (외부 학습 어댑터 메타데이터 포함)
         continue-on-error: true
         run: |
+          DISPLAY_MODEL="${MODEL_ID}"
+          if [ -n "${LORA_ADAPTER_ID}" ]; then
+            DISPLAY_MODEL="${MODEL_ID}+${LORA_ADAPTER_ID}"
+            if [ "${{ inputs.pipeline_mode }}" = "evaluate_only" ]; then
+              echo "외부(RunPod 등)에서 업로드된 HF 어댑터(${LORA_ADAPTER_ID})의 학습 메타데이터를 MLflow에 기록합니다..."
+              uv run python .github/scripts/log_train_to_mlflow.py \
+                --from-hf-repo "${LORA_ADAPTER_ID}" \
+                --run-name "hf-${LABEL}" || true
+            fi
+          fi
           uv run python .github/scripts/log_eval_to_mlflow.py \
             --label "${LABEL}" \
             --track-type "${{ inputs.track_type }}" \
-            --model-id "${{ inputs.model_id }}" \
-            --prompt-version "${{ inputs.prompt_version }}"
+            --target-env "${{ inputs.target_env }}" \
+            --model-id "${DISPLAY_MODEL}" \
+            --prompt-version "${{ inputs.prompt_version }}" \
+            --gpu-type "${{ inputs.gpu_type }}"
 
       - name: 평가 결과 아티팩트 보관
         uses: actions/upload-artifact@v4
@@ -132,41 +381,147 @@ jobs:
         if: env.DISCORD_WEBHOOK_URL != ''
         run: |
           curl -H "Content-Type: application/json" -X POST \
-            -d "{\"content\": \"🚀 **[LLMOps 평가 완료]**\n- **유형**: \`${{ inputs.track_type }}\`\n- **모델**: \`${{ inputs.model_id }}\`\n- **프롬프트**: \`${{ inputs.prompt_version }}\`\n- **결과 라벨**: \`${{ env.LABEL }}\`\nGitHub Actions 요약 화면에서 승인 여부를 결정하세요: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            -d "{\"content\": \"🚀 **[LLMOps 평가 완료]**\n- **대상 환경**: \`${{ inputs.target_env }}\`\n- **유형**: \`${{ inputs.track_type }}\`\n- **모델**: \`${{ inputs.model_id }}\`\n- **LoRA 어댑터**: \`${{ inputs.lora_adapter_id || '없음' }}\`\n- **프롬프트**: \`${{ inputs.prompt_version }}\`\n- **결과 라벨**: \`${{ env.LABEL }}\`\nGitHub Actions 요약 화면에서 승인 여부를 결정하세요: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
             "${DISCORD_WEBHOOK_URL}"
 
+      - name: 평가 성공 시 임시 평가용 Modal 인스턴스 정리 (실패 시 디버깅용 보존)
+        if: success()
+        run: |
+          echo "=================================================="
+          echo "평가 정상 완료 -> 평가용 Modal 인스턴스 정리 (${MODAL_APP_NAME})"
+          echo "=================================================="
+          uv run --with modal modal app stop "${MODAL_APP_NAME}" || true
+
   promote-release:
-    name: Promote Approved Model to AWS SSM Parameter Store
+    name: Promote Approved Model to Modal Serving & AWS SSM
     needs: evaluate
+    if: always() && inputs.pipeline_mode != 'train_only' && needs.evaluate.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: production-approval
 
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      VLLM_URL: ${{ secrets.VLLM_URL || 'https://haram891--cosmos-vllm-serve-modelserver-serve.us-east.modal.run' }}
+      VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
+
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: 대상 환경 파라미터 및 리전 설정
+        id: env-setup
+        run: |
+          if [ "${{ inputs.target_env }}" = "prod" ]; then
+            echo "param_name=/cosmos/prod/model_version" >> $GITHUB_OUTPUT
+            echo "aws_region=ap-northeast-2" >> $GITHUB_OUTPUT
+            echo "env_name=Prod (서울 ECS)" >> $GITHUB_OUTPUT
+          else
+            echo "param_name=/cosmos/dev/model_version" >> $GITHUB_OUTPUT
+            echo "aws_region=us-west-2" >> $GITHUB_OUTPUT
+            echo "env_name=Dev (오레곤 EC2)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 운영 Modal vLLM 인스턴스 배포 (승인 모델 반영)
+        run: |
+          echo "=================================================="
+          echo "승인된 모델을 운영 Modal 인스턴스(cosmos-vllm-serve)에 배포합니다."
+          echo "- 대상 환경: ${{ steps.env-setup.outputs.env_name }}"
+          echo "- 모델: ${{ inputs.model_id }}"
+          echo "- LoRA 어댑터: ${{ inputs.lora_adapter_id || '없음' }}"
+          echo "- GPU: ${{ inputs.gpu_type }}"
+          echo "=================================================="
+          uv run --with modal modal deploy modal_serve.py
+        env:
+          MODAL_APP_NAME: "cosmos-vllm-serve"
+          MODEL_ID: ${{ inputs.model_id }}
+          LORA_ADAPTER_ID: ${{ inputs.lora_adapter_id }}
+          LORA_ADAPTER_NAME: ${{ inputs.lora_adapter_id && 'trained-lora-adapter' || '' }}
+          MODAL_GPU_TYPE: ${{ inputs.gpu_type }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+
+      - name: 운영 vLLM 추론 엔드포인트 기동 상태 확인
+        run: |
+          echo "=================================================="
+          echo "운영 vLLM 추론 엔드포인트 상태 확인 중..."
+          echo "=================================================="
+          BASE_ENDPOINT="${VLLM_URL%/}"
+          BASE_ENDPOINT="${BASE_ENDPOINT%/v1}"
+          BASE_ENDPOINT="${BASE_ENDPOINT%/}"
+          HEALTH_URL="${BASE_ENDPOINT}/v1/models"
+          echo "확인 대상 URL: ${HEALTH_URL}"
+
+          SUCCESS=0
+          for i in {1..40}; do
+            HTTP_CODE=$(curl -s -o /tmp/vllm_prod_resp.txt -w "%{http_code}" \
+              -H "Authorization: Bearer ${VLLM_API_KEY}" \
+              --max-time 20 \
+              "${HEALTH_URL}" || true)
+
+            if [ "${HTTP_CODE}" = "200" ]; then
+              echo "✅ 운영 vLLM 서버 준비 완료 (HTTP 200)"
+              SUCCESS=1
+              break
+            fi
+
+            echo "운영 vLLM 서버 기동 대기 중 (시도 ${i}/40, 응답 코드: ${HTTP_CODE})... 10초 후 재시도"
+            sleep 10
+          done
+
+          if [ "${SUCCESS}" -ne 1 ]; then
+            echo "❌ 운영 vLLM 서버 기동 확인 실패 (타임아웃). Modal 컨테이너 로그:"
+            timeout 15s uv run --with modal modal app logs "cosmos-vllm-serve" > /tmp/modal_prod.log 2>&1 || true
+            tail -n 120 /tmp/modal_prod.log || true
+            exit 1
+          fi
+        env:
+          VLLM_URL: ${{ secrets.VLLM_URL }}
+          VLLM_API_KEY: ${{ secrets.VLLM_API_KEY }}
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_STAGE_CD_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'ap-northeast-2' }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ steps.env-setup.outputs.aws_region }}
 
       - name: AWS SSM Parameter Store 업데이트
         run: |
-          PARAM_NAME="/cosmos/prod/model_version"
+          PARAM_NAME="${{ steps.env-setup.outputs.param_name }}"
+          AWS_REGION="${{ steps.env-setup.outputs.aws_region }}"
+          ENV_NAME="${{ steps.env-setup.outputs.env_name }}"
+          PROMOTED_MODEL="${{ inputs.lora_adapter_id && 'trained-lora-adapter' || inputs.model_id }}"
+
           echo "=================================================="
-          echo "승인된 모델을 SSM Parameter Store에 등록합니다: ${PARAM_NAME} -> ${{ inputs.model_id }}"
+          echo "대상 환경: ${ENV_NAME} (${AWS_REGION})"
+          echo "승인된 모델을 SSM Parameter Store에 등록합니다: ${PARAM_NAME} -> ${PROMOTED_MODEL}"
           echo "=================================================="
 
           aws ssm put-parameter \
             --name "${PARAM_NAME}" \
-            --value "${{ inputs.model_id }}" \
+            --value "${PROMOTED_MODEL}" \
             --type "String" \
-            --overwrite
+            --overwrite \
+            --region "${AWS_REGION}" \
+            --description "Approved model for ${ENV_NAME} from GitHub Run ${{ github.run_id }}"
 
-          echo "성공적으로 SSM 파라미터가 등록되었습니다. 다음 날 새벽 01:00 배치부터 자동 적용됩니다."
+          echo "성공적으로 SSM 파라미터가 등록되었습니다 (${ENV_NAME})."
 
-      - name: 디스코드 운영 배포 승격 알림 발송
-        if: secrets.DISCORD_WEBHOOK_URL != ''
+      - name: 디스코드 배포 승격 알림 발송
+        if: env.DISCORD_WEBHOOK_URL != ''
         run: |
           curl -H "Content-Type: application/json" -X POST \
-            -d "{\"content\": \"✅ **[LLMOps 운영 모델 승격 승인]**\n- **승인 모델**: \`${{ inputs.model_id }}\`\n- **적용 파라미터**: \`/cosmos/prod/model_version\`\n다음 새벽 01:00 KST 배치부터 이 모델로 자동 추론됩니다.\"}" \
-            "${{ secrets.DISCORD_WEBHOOK_URL }}"
+            -d "{\"content\": \"✅ **[LLMOps 모델 승격 승인 - ${{ steps.env-setup.outputs.env_name }}]**\n- **대상 환경**: \`${{ steps.env-setup.outputs.env_name }}\`\n- **승인 모델**: \`${{ inputs.model_id }}\`\n- **LoRA 어댑터**: \`${{ inputs.lora_adapter_id || '없음' }}\`\n- **적용 파라미터**: \`${{ steps.env-setup.outputs.param_name }}\` (${{ steps.env-setup.outputs.aws_region }})\n- **운영 서빙 앱**: \`cosmos-vllm-serve\`\n${{ steps.env-setup.outputs.env_name }} 환경에서 이 모델로 자동 추론됩니다.\"}" \
+            "${DISCORD_WEBHOOK_URL}"
