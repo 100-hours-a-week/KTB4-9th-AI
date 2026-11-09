@@ -29,7 +29,6 @@ async def ensure_judge0_healthy() -> None:
         )
 
 
-# 이렇게
 @router.post("/api/llm/problem")
 async def make_problem(
     request: ProblemRequest, http_request: Request
