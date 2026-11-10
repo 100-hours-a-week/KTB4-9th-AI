@@ -15,6 +15,8 @@ fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 ! grep -Fq 'branches: [prod]' "${main_workflow}" || fail "main workflow must not trigger from prod"
 grep -Fq "github.ref == 'refs/heads/prod'" "${workflow}" || fail "image publication must require the prod ref"
 ! grep -Fq "github.ref == 'refs/heads/main'" "${workflow}" || fail "image publication must not run from main"
+[[ "$(grep -Fc -- '--provenance=false' "${workflow}")" -eq 2 ]] || fail "prod PR and publish builds must disable default attestations"
+[[ "$(grep -Fc -- '--provenance=false' "${main_workflow}")" -eq 1 ]] || fail "main build must disable default attestations"
 
 test_root="$(mktemp -d)"
 trap 'rm -rf "${test_root}"' EXIT
