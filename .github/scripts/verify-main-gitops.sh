@@ -34,7 +34,14 @@ set -euo pipefail
 printf 'aws %s\n' "$*" >>"${CALL_LOG}"
 case "$*" in
   *"ecr wait image-scan-complete"*) exit "${SCAN_WAIT_EXIT:-0}" ;;
-  *"ecr describe-image-scan-findings"*) printf '%s\n' "${SCAN_RESPONSE:-{\"status\":\"COMPLETE\",\"findings\":{\"findingSeverityCounts\":{\"CRITICAL\":${CRITICAL_COUNT:-0}}}}}" ;;
+  *"ecr describe-image-scan-findings"*)
+    if [[ -n "${SCAN_NOT_FOUND_ONCE_FILE:-}" && ! -e "${SCAN_NOT_FOUND_ONCE_FILE}" ]]; then
+      : >"${SCAN_NOT_FOUND_ONCE_FILE}"
+      printf 'ScanNotFoundException\n' >&2
+      exit 255
+    fi
+    printf '%s\n' "${SCAN_RESPONSE:-{\"status\":\"COMPLETE\",\"findings\":{\"findingSeverityCounts\":{\"CRITICAL\":${CRITICAL_COUNT:-0}}}}}"
+    ;;
   *"ecr describe-images"*"imageTag=approved-"*) printf '%s\n' "${EXISTING_APPROVED_DIGEST:-None}" ;;
   *"ecr describe-images"*"imageTag="*) printf '%s\n' "${PUSHED_DIGEST}" ;;
   *"ecr describe-images"*) printf '%s\n' "${APPROVED_IMAGES_JSON:-[]}" ;;
@@ -82,11 +89,16 @@ run_publish() {
 
 success_log="${test_root}/success.log"
 run_publish "${forward_sha}" "${success_log}"
-grep -Fq "ecr wait image-scan-complete" "${success_log}" || fail "must wait for ECR Basic Scan"
+grep -Fq "ecr describe-image-scan-findings" "${success_log}" || fail "must poll ECR Basic Scan findings"
+! grep -Fq "ecr wait image-scan-complete" "${success_log}" || fail "must not use the non-retrying ECR waiter"
 grep -Fq "ecr describe-image-scan-findings" "${success_log}" || fail "must read CRITICAL findings"
 grep -Fq "ecr batch-get-image" "${success_log}" || fail "must fetch the scanned manifest"
 grep -Fq "ecr put-image" "${success_log}" || fail "must add the approved tag"
 grep -Fq -- "--image-tag approved-${forward_sha}" "${success_log}" || fail "must use approved-<SHA>"
+
+scan_retry_marker="${test_root}/scan-not-found-once"
+run_publish "${forward_sha}" "${test_root}/scan-retry.log" \
+  SCAN_NOT_FOUND_ONCE_FILE="${scan_retry_marker}" ECR_SCAN_POLL_INTERVAL_SECONDS=0
 
 run_publish "${forward_sha}" "${test_root}/forward.log" APPROVED_IMAGES_JSON="[{\"pushedAt\":\"2026-11-01T00:00:00Z\",\"tags\":[\"approved-${base_sha}\"]}]"
 
