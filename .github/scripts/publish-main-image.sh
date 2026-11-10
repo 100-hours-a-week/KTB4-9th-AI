@@ -16,10 +16,41 @@ approved_tag="approved-${IMAGE_TAG}"
 docker tag "${LOCAL_IMAGE}" "${remote_image}"
 docker push "${remote_image}"
 
-aws ecr wait image-scan-complete --repository-name "${ECR_REPOSITORY}" --image-id "imageTag=${IMAGE_TAG}" --region "${AWS_REGION}"
-scan_result="$(aws ecr describe-image-scan-findings \
-  --repository-name "${ECR_REPOSITORY}" --image-id "imageTag=${IMAGE_TAG}" --region "${AWS_REGION}" \
-  --query '{status:imageScanStatus.status,findings:imageScanFindings}' --output json)"
+scan_poll_interval="${ECR_SCAN_POLL_INTERVAL_SECONDS:-5}"
+scan_max_attempts="${ECR_SCAN_MAX_ATTEMPTS:-60}"
+[[ "${scan_poll_interval}" =~ ^[0-9]+$ && "${scan_max_attempts}" =~ ^[1-9][0-9]*$ ]] || {
+  printf 'ERROR: invalid ECR scan polling configuration\n' >&2
+  exit 1
+}
+
+scan_result=""
+scan_complete=false
+scan_error="$(mktemp)"
+trap 'rm -f "${scan_error}"' EXIT
+for ((attempt = 1; attempt <= scan_max_attempts; attempt++)); do
+  if scan_result="$(aws ecr describe-image-scan-findings \
+    --repository-name "${ECR_REPOSITORY}" \
+    --image-id "imageTag=${IMAGE_TAG}" \
+    --region "${AWS_REGION}" \
+    --query '{status:imageScanStatus.status,findings:imageScanFindings}' \
+    --output json 2>"${scan_error}")"; then
+    scan_status="$(jq -r '.status // empty' <<<"${scan_result}")"
+    case "${scan_status}" in
+      COMPLETE) scan_complete=true; break ;;
+      IN_PROGRESS) ;;
+      *) printf 'ERROR: ECR image scan entered unexpected status: %s\n' "${scan_status:-missing}" >&2; exit 1 ;;
+    esac
+  elif ! grep -Fq 'ScanNotFoundException' "${scan_error}"; then
+    cat "${scan_error}" >&2
+    exit 1
+  fi
+
+  sleep "${scan_poll_interval}"
+done
+rm -f "${scan_error}"
+trap - EXIT
+[[ "${scan_complete}" == true ]] || { printf 'ERROR: ECR image scan did not complete in time\n' >&2; exit 1; }
+
 critical="$(jq -er '
   if .status != "COMPLETE" then error("scan is not complete")
   elif (.findings | type) != "object" then error("scan findings are missing")
