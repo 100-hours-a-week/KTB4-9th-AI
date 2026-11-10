@@ -96,7 +96,7 @@ jobs:
           persist-credentials: false
 
       - name: Build PR image
-        run: docker build --pull -f dockerfile -t ai-test:${{ github.sha }} .
+        run: docker build --pull --provenance=false -f dockerfile -t ai-test:${{ github.sha }} .
 
       - name: Scan built image with Trivy (SARIF)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -163,7 +163,7 @@ jobs:
           persist-credentials: false
 
       - name: Build production image
-        run: docker build --pull -f dockerfile -t ai-test:${{ github.sha }} .
+        run: docker build --pull --provenance=false -f dockerfile -t ai-test:${{ github.sha }} .
 
       - name: Verify production publication configuration
         env:
