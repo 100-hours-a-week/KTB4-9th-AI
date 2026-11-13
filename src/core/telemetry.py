@@ -418,6 +418,14 @@ def observe_batch_job(*, job: str, only: str | None = None):
         span.set_attribute("batch.job", _bounded(job))
         if only:
             span.set_attribute("batch.step", _bounded(only))
+        for attribute, variable in (
+            ("k8s.job.name", "K8S_JOB_NAME"),
+            ("k8s.pod.name", "K8S_POD_NAME"),
+            ("k8s.pod.uid", "K8S_POD_UID"),
+            ("batch.execution.id", "K8S_POD_UID"),
+        ):
+            if value := os.getenv(variable):
+                span.set_attribute(attribute, _bounded(value))
         try:
             yield
         except BaseException as error:

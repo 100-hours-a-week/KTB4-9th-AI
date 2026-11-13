@@ -180,6 +180,9 @@ def test_batch_root_span_records_identity_status_without_exception_content(
         "src.core.telemetry.trace.get_tracer",
         lambda _name: provider.get_tracer("batch-test"),
     )
+    monkeypatch.setenv("K8S_JOB_NAME", "cosmos-ai-generate-123")
+    monkeypatch.setenv("K8S_POD_NAME", "cosmos-ai-generate-123-abcd")
+    monkeypatch.setenv("K8S_POD_UID", "11111111-2222-3333-4444-555555555555")
 
     with pytest.raises(RuntimeError, match=secret):
         with observe_batch_job(job="generate", only="battle"):
@@ -190,6 +193,9 @@ def test_batch_root_span_records_identity_status_without_exception_content(
     assert span.attributes["batch.job"] == "generate"
     assert span.attributes["batch.step"] == "battle"
     assert span.attributes["error.type"] == "RuntimeError"
+    assert span.attributes["k8s.job.name"] == "cosmos-ai-generate-123"
+    assert span.attributes["k8s.pod.uid"] == "11111111-2222-3333-4444-555555555555"
+    assert span.attributes["batch.execution.id"] == span.attributes["k8s.pod.uid"]
     assert secret not in json.dumps(
         [dict(event.attributes or {}) for event in span.events], default=str
     )
