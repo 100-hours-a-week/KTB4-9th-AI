@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from logging.config import dictConfig
 
@@ -39,17 +40,38 @@ class TraceContext(logging.Filter):
 
 
 class JsonFormatter(logging.Formatter):
+    @staticmethod
+    def _safe_message(record: logging.LogRecord) -> str:
+        if record.exc_info and record.exc_info[0] is not None:
+            return f"{record.exc_info[0].__name__} raised"
+
+        def sanitize(value: object) -> object:
+            return type(value).__name__ if isinstance(value, BaseException) else value
+
+        args = record.args
+        if isinstance(args, tuple):
+            safe_args: object = tuple(sanitize(value) for value in args)
+        elif isinstance(args, dict):
+            safe_args = {key: sanitize(value) for key, value in args.items()}
+        else:
+            safe_args = sanitize(args)
+        try:
+            return str(record.msg) % safe_args if args else str(record.msg)
+        except (TypeError, ValueError):
+            return str(record.msg)
+
     def format(self, record: logging.LogRecord) -> str:
         payload = {
             "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": self._safe_message(record),
+            "service.name": os.getenv("OTEL_SERVICE_NAME", "cosmos-ai"),
             "trace_id": getattr(record, "trace_id", ""),
             "span_id": getattr(record, "span_id", ""),
         }
-        if record.exc_info:
-            payload["stack_trace"] = self.formatException(record.exc_info)
+        if record.exc_info and record.exc_info[0] is not None:
+            payload["error_type"] = record.exc_info[0].__name__
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 

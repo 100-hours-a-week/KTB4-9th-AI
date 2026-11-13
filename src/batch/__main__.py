@@ -21,7 +21,7 @@ from src.batch.generate import (
 )
 from src.batch.send import run_send
 from src.core.logging import setup_logging
-from src.core.telemetry import init_telemetry, shutdown_telemetry
+from src.core.telemetry import init_telemetry, observe_batch_job, shutdown_telemetry
 from src.db.session import close_engine, engine
 
 
@@ -84,6 +84,7 @@ if __name__ == "__main__":
     setup_logging()
     init_telemetry(engine=engine)
     try:
-        asyncio.run(main(args.job, args.only))
+        with observe_batch_job(job=args.job, only=args.only):
+            asyncio.run(main(args.job, args.only))
     finally:
         shutdown_telemetry(timeout_millis=5000)

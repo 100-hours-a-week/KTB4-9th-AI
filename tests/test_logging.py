@@ -1,11 +1,12 @@
 import json
 import logging
+import sys
 import warnings
 
 from fastapi.testclient import TestClient
 
 from src.core.config import get_settings
-from src.core.logging import setup_logging
+from src.core.logging import JsonFormatter, setup_logging
 from src.main import app
 
 
@@ -37,6 +38,29 @@ def test_application_log_is_json_with_trace_correlation_fields(capsys) -> None:
     assert payload["logger"] == "test.telemetry"
     assert "trace_id" in payload
     assert "span_id" in payload
+
+
+def test_json_formatter_does_not_export_raw_exception_message_or_stack() -> None:
+    secret = "provider-response-with-user-code-and-key"
+    try:
+        raise RuntimeError(secret)
+    except RuntimeError as error:
+        record = logging.LogRecord(
+            name="privacy",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="LLM failed: %s",
+            args=(error,),
+            exc_info=sys.exc_info(),
+        )
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert secret not in json.dumps(payload)
+    assert payload["message"] == "RuntimeError raised"
+    assert payload["error_type"] == "RuntimeError"
+    assert "stack_trace" not in payload
 
 
 def test_http_client_loggers_are_quieted() -> None:

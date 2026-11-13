@@ -12,12 +12,14 @@ from typing import Any
 
 from fastapi import FastAPI, Response
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -133,6 +135,33 @@ def estimate_llm_cost_usd(
     return token_cost / 1_000_000
 
 
+def _metric_readers(environ: Mapping[str, str]) -> list[Any]:
+    exporter = environ.get("OTEL_METRICS_EXPORTER", "prometheus").lower()
+    if exporter == "none":
+        return []
+    if exporter == "otlp":
+        endpoint = environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if not endpoint:
+            logger.warning("OTEL metrics exporter is enabled without an OTLP endpoint")
+            return []
+        return [
+            PeriodicExportingMetricReader(
+                OTLPMetricExporter(
+                    endpoint=endpoint,
+                    insecure=endpoint.startswith("http://"),
+                    timeout=float(environ.get("OTEL_EXPORTER_OTLP_TIMEOUT", "10")),
+                ),
+                export_interval_millis=int(
+                    environ.get("OTEL_METRIC_EXPORT_INTERVAL", "10000")
+                ),
+            )
+        ]
+    if exporter != "prometheus":
+        logger.warning("unsupported OTEL_METRICS_EXPORTER=%s", exporter)
+        return []
+    return [PrometheusMetricReader()]
+
+
 @dataclass
 class _LLMInstruments:
     requests: Any
@@ -170,9 +199,8 @@ class TelemetryRuntime:
                 resource = Resource.create(
                     {"service.name": environ.get("OTEL_SERVICE_NAME", "cosmos-ai")}
                 )
-                reader = PrometheusMetricReader()
                 self.meter_provider = MeterProvider(
-                    resource=resource, metric_readers=[reader]
+                    resource=resource, metric_readers=_metric_readers(environ)
                 )
 
                 endpoint = environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -346,7 +374,11 @@ def observe_llm_call(
         fallback=fallback,
     )
     tracer = trace.get_tracer("cosmos.ai.llm")
-    with tracer.start_as_current_span(f"gen_ai.{operation}") as span:
+    with tracer.start_as_current_span(
+        f"gen_ai.{operation}",
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as span:
         span.set_attribute("gen_ai.operation.name", observation.operation)
         span.set_attribute("gen_ai.provider.name", observation.provider)
         span.set_attribute("gen_ai.request.model", observation.model)
@@ -372,6 +404,28 @@ def observe_llm_call(
                 [_finish_reason(observation.finish_reason)],
             )
             _record_llm_observation(observation, result="success")
+
+
+@contextmanager
+def observe_batch_job(*, job: str, only: str | None = None):
+    """Create one bounded-cardinality root span for a short-lived batch execution."""
+    tracer = trace.get_tracer("cosmos.ai.batch")
+    with tracer.start_as_current_span(
+        f"batch.{_bounded(job)}",
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as span:
+        span.set_attribute("batch.job", _bounded(job))
+        if only:
+            span.set_attribute("batch.step", _bounded(only))
+        try:
+            yield
+        except BaseException as error:
+            span.set_attribute("error.type", type(error).__name__)
+            span.set_status(Status(StatusCode.ERROR, type(error).__name__))
+            raise
+        else:
+            span.set_status(Status(StatusCode.OK))
 
 
 def _record_llm_observation(observation: LLMObservation, *, result: str) -> None:
@@ -404,7 +458,15 @@ def _record_llm_observation(observation: LLMObservation, *, result: str) -> None
         os.getenv("LLM_PRICING_USD_PER_MILLION"),
     )
     if cost is not None:
-        instruments.cost.add(cost, attributes)
+        instruments.cost.add(
+            cost,
+            {
+                **attributes,
+                "pricing_version": _bounded(
+                    os.getenv("LLM_PRICING_VERSION"), default="unversioned"
+                ),
+            },
+        )
     if observation.first_token_seconds is not None:
         instruments.first_token.record(observation.first_token_seconds, attributes)
 

@@ -1,5 +1,12 @@
 import json
 
+import pytest
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
+
 from src.core.telemetry import (
     LLMUsage,
     TelemetryRuntime,
@@ -7,6 +14,7 @@ from src.core.telemetry import (
     extract_llm_usage,
     init_telemetry,
     metrics_response,
+    observe_batch_job,
     observe_llm_call,
     record_llm_fallback,
     record_llm_retry,
@@ -108,6 +116,7 @@ def test_prometheus_metric_names_match_dashboard_contract(monkeypatch) -> None:
         "LLM_PRICING_USD_PER_MILLION",
         json.dumps({"google/gemini-test": {"input": 1, "output": 2}}),
     )
+    monkeypatch.setenv("LLM_PRICING_VERSION", "reviewed-2026-11-13")
     init_telemetry()
     with observe_llm_call(provider="google", model="gemini-test") as observation:
         observation.usage = LLMUsage(input_tokens=10, output_tokens=5, total_tokens=15)
@@ -127,3 +136,60 @@ def test_prometheus_metric_names_match_dashboard_contract(monkeypatch) -> None:
         "cosmos_llm_time_to_first_token_seconds",
     ):
         assert metric in body
+    assert 'pricing_version="reviewed-2026-11-13"' in body
+
+
+def test_llm_error_span_never_exports_raw_exception_content(monkeypatch) -> None:
+    secret = "prompt-and-api-key-must-not-leave-process"
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        "src.core.telemetry.trace.get_tracer",
+        lambda _name: provider.get_tracer("privacy-test"),
+    )
+
+    with pytest.raises(RuntimeError, match=secret):
+        with observe_llm_call(provider="google", model="gemini-test"):
+            raise RuntimeError(secret)
+
+    exported = json.dumps(
+        [
+            {
+                "attributes": dict(span.attributes or {}),
+                "events": [dict(event.attributes or {}) for event in span.events],
+                "status": span.status.description,
+            }
+            for span in exporter.get_finished_spans()
+        ],
+        default=str,
+    )
+    assert secret not in exported
+    assert "exception.message" not in exported
+    assert "exception.stacktrace" not in exported
+
+
+def test_batch_root_span_records_identity_status_without_exception_content(
+    monkeypatch,
+) -> None:
+    secret = "batch-payload-must-not-leave-process"
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        "src.core.telemetry.trace.get_tracer",
+        lambda _name: provider.get_tracer("batch-test"),
+    )
+
+    with pytest.raises(RuntimeError, match=secret):
+        with observe_batch_job(job="generate", only="battle"):
+            raise RuntimeError(secret)
+
+    span = exporter.get_finished_spans()[0]
+    assert span.name == "batch.generate"
+    assert span.attributes["batch.job"] == "generate"
+    assert span.attributes["batch.step"] == "battle"
+    assert span.attributes["error.type"] == "RuntimeError"
+    assert secret not in json.dumps(
+        [dict(event.attributes or {}) for event in span.events], default=str
+    )
