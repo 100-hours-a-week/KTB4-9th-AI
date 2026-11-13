@@ -21,7 +21,8 @@ from src.batch.generate import (
 )
 from src.batch.send import run_send
 from src.core.logging import setup_logging
-from src.db.session import close_engine
+from src.core.telemetry import init_telemetry, shutdown_telemetry
+from src.db.session import close_engine, engine
 
 
 async def show_plan() -> None:
@@ -81,4 +82,8 @@ async def main(job: str, only: str | None = None) -> None:
 if __name__ == "__main__":
     args = parse_args()
     setup_logging()
-    asyncio.run(main(args.job, args.only))
+    init_telemetry(engine=engine)
+    try:
+        asyncio.run(main(args.job, args.only))
+    finally:
+        shutdown_telemetry(timeout_millis=5000)

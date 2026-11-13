@@ -1,3 +1,4 @@
+import json
 import logging
 import warnings
 
@@ -24,6 +25,18 @@ def test_setup_logging_follows_log_level() -> None:
         logging.getLogger().level
         == logging.getLevelNamesMapping()[get_settings().log_level.upper()]
     )
+
+
+def test_application_log_is_json_with_trace_correlation_fields(capsys) -> None:
+    setup_logging()
+
+    logging.getLogger("test.telemetry").info("telemetry-check")
+
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["message"] == "telemetry-check"
+    assert payload["logger"] == "test.telemetry"
+    assert "trace_id" in payload
+    assert "span_id" in payload
 
 
 def test_http_client_loggers_are_quieted() -> None:
@@ -76,4 +89,6 @@ def test_repeated_library_warning_is_logged_once(capsys) -> None:
     out = capsys.readouterr().out
     assert out.count("temperature will be ignored") == 1
     assert out.count("다른 경고") == 1
-    assert "WARNING py.warnings" in out  # 우리 로그 형식으로 나온다
+    payloads = [json.loads(line) for line in out.splitlines()]
+    assert all(payload["level"] == "WARNING" for payload in payloads)
+    assert all(payload["logger"] == "py.warnings" for payload in payloads)

@@ -8,7 +8,12 @@ from src.batch.launcher import stop_all
 from src.batch.scheduler import start_scheduler
 from src.core.exception_handler import register_exception_handlers
 from src.core.logging import setup_logging
-from src.db.session import close_engine
+from src.core.telemetry import (
+    init_telemetry,
+    install_metrics_endpoint,
+    shutdown_telemetry,
+)
+from src.db.session import close_engine, engine
 from src.router.admin import router as admin_router
 from src.router.evaluation import router as evaluation_router
 from src.router.health import router as health_router
@@ -20,17 +25,23 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     setup_logging()
+    init_telemetry(app=app, engine=engine)
     logger.info("애플리케이션 시작")
     scheduler = start_scheduler()
-    yield
-    if scheduler is not None:
-        scheduler.shutdown(wait=False)  # 실행 중인 배치는 취소된다
-    await stop_all()
-    await close_engine()  # 커넥션 풀 정리
-    logger.info("애플리케이션 종료")
+    try:
+        yield
+    finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)  # 실행 중인 배치는 취소된다
+        await stop_all()
+        await close_engine()  # 커넥션 풀 정리
+        shutdown_telemetry(timeout_millis=5000)
+        logger.info("애플리케이션 종료")
 
 
 app = FastAPI(lifespan=lifespan)
+install_metrics_endpoint(app)
+init_telemetry(app=app, engine=engine)
 
 register_exception_handlers(app)
 
