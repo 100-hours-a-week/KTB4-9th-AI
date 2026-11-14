@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import re
 
 from pydantic import BaseModel, Field
 
@@ -65,11 +66,12 @@ STORY_THEMES = (
     "편의점 재고",
     "날씨 관측소",
     "놀이공원",
-    "카카오",
+    "여행 계획",
 )
 # 이야기형으로 낼 비율. 나머지는 이야기 없는 수학형으로 낸다.
 STORY_RATE = 0.5
-
+# 조건을 감추는 표현. 이런 지문은 사용자가 답을 구할 수 없다.
+VAGUE_CONDITION = re.compile(r"특정한?\s*(\S+\s*)?(조건|기준|규칙)")
 GENERATE_PROMPT = """당신은 배틀 문제 출제자다.
 
 사용자는 코드를 제출하지 않는다. 주어진 입력을 보고 출력값만 적는다.
@@ -97,6 +99,11 @@ GENERATE_PROMPT = """당신은 배틀 문제 출제자다.
   코드 제출을 요구하는 표현을 쓰지 않는다.
   마지막 줄은 반드시 "{guide}"로 끝낸다.
 {story_rule}
+- 요구할 것에는 조건과 기준을 숫자와 비교 방법까지 모두 적는다.
+  "특정 조건", "특정 기준", "특정 규칙"처럼 내용을 감추는 표현은 쓰지 않는다.
+  지문만 읽고 test_inputs의 답을 손으로 구할 수 있어야 한다.
+- 답이 없을 때 출력하는 값은 실제 답으로 나올 수 없는 값으로 정한다.
+- [난이도]의 문장을 지문에 옮겨 적지 않는다.
 - test_inputs는 서로 다른 입력 {count}개다. 출력은 적지 않는다.
   한 입력의 원소는 다섯 개 안팎으로 한다.
   한눈에 보이되 계산은 몇 단계 거치게 만든다.
@@ -260,6 +267,14 @@ async def static_validate(state: BattleState) -> dict:
             DiscardReason.VALIDATION_FAILED,
             stage,
             f"지문이 {MAX_CONTENT_LENGTH}자를 넘음: {len(state.problem_content)}자",
+        )
+
+    vague = VAGUE_CONDITION.search(state.problem_content)
+    if vague:
+        return discard(
+            DiscardReason.VALIDATION_FAILED,
+            stage,
+            f"조건을 감추는 표현이 있음: {vague.group(0)}",
         )
 
     inputs = {case.input.strip() for case in state.test_cases if case.input.strip()}
