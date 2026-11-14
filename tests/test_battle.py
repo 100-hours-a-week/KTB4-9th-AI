@@ -8,7 +8,6 @@ from src.core.enums import Category, DiscardReason, ExecutionStatus, Trigger
 from src.problem.battle import nodes as module
 from src.problem.battle.nodes import (
     ANSWER_GUIDE,
-    STORY_NAMES,
     GeneratedBattleProblem,
     build_prompt,
     ensure_answer_guide,
@@ -285,10 +284,27 @@ def test_프롬프트가_코드_제출_표현을_막고_안내_문구를_요구�
     assert "코드를 제출하지 않는다" in prompt
 
 
-def test_프롬프트에_난이도_규칙과_이름_목록이_들어간다():
-    prompt = build_prompt(Category.BINARY_SEARCH)
+def test_이야기형이면_지정한_이름과_배경이_들어간다():
+    prompt = build_prompt(
+        Category.BINARY_SEARCH, story=True, names=["케린", "존"], theme="버스 노선"
+    )
 
     assert "생각 단계를 두세 개 겹친다" in prompt
     assert "다섯 개 안팎" in prompt
-    for name in STORY_NAMES:
-        assert name in prompt
+    assert "케린, 존 중에서 한두 명" in prompt
+    assert "버스 노선" in prompt
+
+
+def test_수학형이면_등장인물을_지정하지_않는다():
+    prompt = build_prompt(Category.BINARY_SEARCH, story=False)
+
+    assert "이야기 설정과 등장인물 없이" in prompt
+    assert "등장인물은" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_조건을_감추는_지문은_폐기한다():
+    content = f"레인은 특정 무게 조건을 만족하는 상자를 찾는다.\n\n{ANSWER_GUIDE}"
+    result = await static_validate(make_state(problem_content=content))
+
+    assert result["discard_reason"] == DiscardReason.VALIDATION_FAILED
