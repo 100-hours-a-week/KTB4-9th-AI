@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import re
 
 from pydantic import BaseModel, Field
 
@@ -28,7 +29,7 @@ from src.problem.battle.state import (
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "generate_battle_problem/v3"
+PROMPT_VERSION = "generate_battle_problem/v4"
 
 # 채점 서버(judge0 language_id 71)의 파이썬 버전.
 REFERENCE_RUNTIME = "Python 3.8"
@@ -42,8 +43,35 @@ RESPONSE_CATEGORIES = [c for c in Category if c != Category.RANDOM]
 # 사용자가 출력값만 적는 형식임을 지문 끝에서 알린다.
 ANSWER_GUIDE = "각 입력에 대한 출력값을 적으시오."
 # 지문 상황 설명에 쓸 이름. 팀원 이름을 쓴다.
-STORY_NAMES = ("존", "레인", "웨이드", "케린", "올리", "비키", "찰리", "알렉스", "케빈")
-
+STORY_NAMES = (
+    "케빈",
+    "알렉스",
+    "찰리",
+    "케린",
+    "올리",
+    "비키",
+    "웨이드",
+    "레인",
+    "존",
+    "보이드",
+)
+# 이야기 배경. 모델에게 맡기면 보석·보물 상자 이야기만 반복해서 코드가 고른다.
+STORY_THEMES = (
+    "도서관 대출",
+    "택배 물류",
+    "버스 노선",
+    "마라톤 대회",
+    "음악 축제",
+    "우주 정거장",
+    "편의점 재고",
+    "날씨 관측소",
+    "놀이공원",
+    "여행 계획",
+)
+# 이야기형으로 낼 비율. 나머지는 이야기 없는 수학형으로 낸다.
+STORY_RATE = 0.5
+# 조건을 감추는 표현. 이런 지문은 사용자가 답을 구할 수 없다.
+VAGUE_CONDITION = re.compile(r"특정한?\s*(\S+\s*)?(조건|기준|규칙)")
 GENERATE_PROMPT = """당신은 배틀 문제 출제자다.
 
 사용자는 코드를 제출하지 않는다. 주어진 입력을 보고 출력값만 적는다.
@@ -65,13 +93,17 @@ GENERATE_PROMPT = """당신은 배틀 문제 출제자다.
 - 문제는 한국어로 만든다.
 - problem_title은 {max_title}자 이하로 쓴다.
 - problem_content는 {max_content}자 이하로 쓰고,
-  상황 설명, 요구할 것, 입력 형식, 출력 형식을 각각 빈 줄로 나눠 쓴다.
+  (상황 설명,) 요구할 것, 입력 형식, 출력 형식을 각각 빈 줄로 나눠 쓴다.
   한 덩어리로 이어 쓰지 않는다. 사용자가 모바일 화면에서 읽는다.
   "프로그램을 작성하세요", "구현하세요", "코드를 작성하세요" 같은
   코드 제출을 요구하는 표현을 쓰지 않는다.
   마지막 줄은 반드시 "{guide}"로 끝낸다.
-- 상황 설명은 두세 문장으로 쓴다. 배경만 짧게 깔고 요구할 것으로 넘어간다.
-- 사람 이름이 필요하면 {names} 중에서 쓴다. 다른 이름은 만들지 않는다.
+{story_rule}
+- 요구할 것에는 조건과 기준을 숫자와 비교 방법까지 모두 적는다.
+  "특정 조건", "특정 기준", "특정 규칙"처럼 내용을 감추는 표현은 쓰지 않는다.
+  지문만 읽고 test_inputs의 답을 손으로 구할 수 있어야 한다.
+- 답이 없을 때 출력하는 값은 실제 답으로 나올 수 없는 값으로 정한다.
+- [난이도]의 문장을 지문에 옮겨 적지 않는다.
 - test_inputs는 서로 다른 입력 {count}개다. 출력은 적지 않는다.
   한 입력의 원소는 다섯 개 안팎으로 한다.
   한눈에 보이되 계산은 몇 단계 거치게 만든다.
@@ -95,14 +127,40 @@ class GeneratedBattleProblem(BaseModel):
     reference_code: str
 
 
-def build_prompt(category: Category) -> str:
-    """배틀 문제 생성 프롬프트를 만든다."""
+def build_story_rule(story: bool, names: list[str], theme: str) -> str:
+    """이야기형이면 등장인물 후보와 배경을 지정하고, 아니면 이야기 없이 쓰게 한다."""
+    if not story:
+        return (
+            "- 이야기 설정과 등장인물 없이 수와 조건만으로 간결하게 쓴다.\n"
+            '  예: "N개의 정수 중 합이 S인 두 수의 곱의 최댓값을 구한다."'
+        )
+    return (
+        "- 상황 설명은 두세 문장으로 쓴다. 배경만 짧게 깔고 요구할 것으로 넘어간다.\n"
+        f"- 등장인물은 {', '.join(names)} 중에서 한두 명 쓴다. "
+        "다른 이름은 만들지 않는다.\n"
+        f"- 이야기 배경은 다음으로 한다: {theme}. 보석, 보물, 상자는 쓰지 않는다."
+    )
+
+
+def build_prompt(
+    category: Category,
+    story: bool | None = None,
+    names: list[str] | None = None,
+    theme: str | None = None,
+) -> str:
+    """배틀 문제 생성 프롬프트를 만든다. 비운 값은 무작위로 고른다."""
+    if story is None:
+        story = random.random() < STORY_RATE
     return GENERATE_PROMPT.format(
         category=category.value,
         max_title=MAX_TITLE_LENGTH,
         max_content=MAX_CONTENT_LENGTH - len(ANSWER_GUIDE) - 2,
         guide=ANSWER_GUIDE,
-        names=", ".join(STORY_NAMES),
+        story_rule=build_story_rule(
+            story,
+            names or random.sample(STORY_NAMES, 2),
+            theme or random.choice(STORY_THEMES),
+        ),
         count=TEST_CASE_COUNT,
         language=REFERENCE_LANGUAGE.value,
         runtime=REFERENCE_RUNTIME,
@@ -131,7 +189,7 @@ async def generate_battle_problem(state: BattleState) -> dict:
     """
     배틀 문제와 테스트 입력, 검증용 코드를 한 번에 생성한다.
 
-    배치(Trigger.BATCH)면 vLLM 모델로 만들고, 안 되면 Gemini로 폴백한다.
+    새벽 배치(Trigger.BATCH)면 vLLM 모델로 만들고, 안 되면 Gemini로 폴백한다.
 
     카테고리는 코드가 무작위로 정한다. 재시도로 다시 들어오면 같은
     카테고리를 유지하고 문제만 새로 만든다.
@@ -149,7 +207,7 @@ async def generate_battle_problem(state: BattleState) -> dict:
     )
     category = state.category or random.choice(RESPONSE_CATEGORIES)
 
-    # 배치에만 vLLM으로 만든다. 온디맨드는 지금처럼 Gemini
+    # 새벽 배치에만 vLLM으로 만든다. 온디맨드는 지금처럼 Gemini
     local = batch_local_model() if state.trigger is Trigger.BATCH else None
 
     try:
@@ -209,6 +267,14 @@ async def static_validate(state: BattleState) -> dict:
             DiscardReason.VALIDATION_FAILED,
             stage,
             f"지문이 {MAX_CONTENT_LENGTH}자를 넘음: {len(state.problem_content)}자",
+        )
+
+    vague = VAGUE_CONDITION.search(state.problem_content)
+    if vague:
+        return discard(
+            DiscardReason.VALIDATION_FAILED,
+            stage,
+            f"조건을 감추는 표현이 있음: {vague.group(0)}",
         )
 
     inputs = {case.input.strip() for case in state.test_cases if case.input.strip()}
