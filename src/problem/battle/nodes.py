@@ -55,7 +55,8 @@ STORY_NAMES = (
     "존",
     "보이드",
 )
-# 이야기 배경. 모델에게 맡기면 보석·보물 상자 이야기만 반복해서 코드가 고른다.
+# 이야기형 문제의 배경 후보. 카테고리와는 별개다.
+# 모델에게 맡기면 보석·보물 상자 이야기만 반복해서 코드가 고른다.
 STORY_THEMES = (
     "도서관 대출",
     "택배 물류",
@@ -93,7 +94,7 @@ GENERATE_PROMPT = """당신은 배틀 문제 출제자다.
 - 문제는 한국어로 만든다.
 - problem_title은 {max_title}자 이하로 쓴다.
 - problem_content는 {max_content}자 이하로 쓰고,
-  (상황 설명,) 요구할 것, 입력 형식, 출력 형식을 각각 빈 줄로 나눠 쓴다.
+  상황 설명(있을 때), 요구할 것, 입력 형식, 출력 형식을 각각 빈 줄로 나눠 쓴다.
   한 덩어리로 이어 쓰지 않는다. 사용자가 모바일 화면에서 읽는다.
   "프로그램을 작성하세요", "구현하세요", "코드를 작성하세요" 같은
   코드 제출을 요구하는 표현을 쓰지 않는다.
@@ -189,7 +190,7 @@ async def generate_battle_problem(state: BattleState) -> dict:
     """
     배틀 문제와 테스트 입력, 검증용 코드를 한 번에 생성한다.
 
-    새벽 배치(Trigger.BATCH)면 vLLM 모델로 만들고, 안 되면 Gemini로 폴백한다.
+    배치(Trigger.BATCH)면 vLLM 모델로 만들고, 안 되면 Gemini로 폴백한다.
 
     카테고리는 코드가 무작위로 정한다. 재시도로 다시 들어오면 같은
     카테고리를 유지하고 문제만 새로 만든다.
@@ -207,7 +208,7 @@ async def generate_battle_problem(state: BattleState) -> dict:
     )
     category = state.category or random.choice(RESPONSE_CATEGORIES)
 
-    # 새벽 배치에만 vLLM으로 만든다. 온디맨드는 지금처럼 Gemini
+    # 배치에만 vLLM으로 만든다. 온디맨드는 지금처럼 Gemini
     local = batch_local_model() if state.trigger is Trigger.BATCH else None
 
     try:
