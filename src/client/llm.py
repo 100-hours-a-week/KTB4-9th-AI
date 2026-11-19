@@ -15,6 +15,11 @@ from pydantic import BaseModel, ValidationError, model_validator
 from src.client.langfuse import langfuse_prompt_context
 from src.core.config import get_settings
 from src.core.exception import LLMOutputParseError
+from src.core.telemetry import (
+    observe_llm_call,
+    record_llm_fallback,
+    record_llm_retry,
+)
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -77,6 +82,7 @@ class LocalModel(BaseModel):
 
 # 설정돼 있으면 이 컨텍스트 안의 call_llm_structured가 Gemini 대신 이 모델을 부른다
 _local_model: ContextVar[LocalModel | None] = ContextVar("local_model", default=None)
+_fallback_call: ContextVar[bool] = ContextVar("fallback_call", default=False)
 
 
 def batch_model_name() -> str | None:
@@ -264,17 +270,36 @@ async def call_llm_structured[T: BaseModel](
         if local is not None:
             return await call_local_structured(prompt, local, schema, system)
 
-        structured = build_chat_model(cfg).with_structured_output(schema)
+        structured = build_chat_model(cfg).with_structured_output(
+            schema, include_raw=True
+        )
         # system 메시지는 LangChain이 Gemini의 system_instruction로 보낸다
         messages = [("system", system), ("human", prompt)] if system else prompt
-        try:
-            result = await structured.ainvoke(messages)
-        except (OutputParserException, ValueError) as error:
-            raise LLMOutputParseError(f"구조화 응답 해석 실패: {error}") from error
+        with observe_llm_call(
+            provider="google",
+            model=cfg.model_name or "unknown",
+            fallback=_fallback_call.get(),
+        ) as observation:
+            try:
+                payload = await structured.ainvoke(messages)
+            except (OutputParserException, ValueError) as error:
+                raise LLMOutputParseError("구조화 응답 해석 실패") from error
 
-        if not isinstance(result, schema):
-            raise LLMOutputParseError("구조화 응답이 비어 있음")
-        return result
+            if isinstance(payload, dict) and "parsed" in payload:
+                raw = payload.get("raw")
+                observation.record_response(raw)
+                parsing_error = payload.get("parsing_error")
+                if parsing_error is not None:
+                    raise LLMOutputParseError(
+                        "구조화 응답 해석 실패"
+                    ) from parsing_error
+                result = payload.get("parsed")
+            else:
+                result = payload
+
+            if not isinstance(result, schema):
+                raise LLMOutputParseError("구조화 응답이 비어 있음")
+            return result
 
 
 @lru_cache
@@ -339,30 +364,36 @@ async def call_local_structured[T: BaseModel](
     if system:
         messages.insert(0, {"role": "system", "content": system})
 
-    response = await get_local_client().chat.completions.create(
+    with observe_llm_call(
+        provider="openai_compatible",
         model=model.model_name,
-        messages=messages,
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": schema.__name__,
-                "schema": schema.model_json_schema(),
+        fallback=False,
+    ) as observation:
+        response = await get_local_client().chat.completions.create(
+            model=model.model_name,
+            messages=messages,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema.__name__,
+                    "schema": schema.model_json_schema(),
+                },
             },
-        },
-        timeout=model.timeout_s,
-        **options,
-    )
-    choice = response.choices[0]
-    text = choice.message.content or ""
-    if not text.strip():
-        raise LLMOutputParseError("구조화 응답이 비어 있음")
-    try:
-        return schema.model_validate_json(text)
-    except ValidationError as error:
-        # finish_reason이 length면 출력이 잘려 JSON이 끝나지 않은 것이다
-        raise LLMOutputParseError(
-            f"구조화 응답 해석 실패 (finish_reason={choice.finish_reason}): {error}"
-        ) from error
+            timeout=model.timeout_s,
+            **options,
+        )
+        observation.record_response(response)
+        choice = response.choices[0]
+        text = choice.message.content or ""
+        if not text.strip():
+            raise LLMOutputParseError("구조화 응답이 비어 있음")
+        try:
+            return schema.model_validate_json(text)
+        except ValidationError as error:
+            # finish_reason이 length면 출력이 잘려 JSON이 끝나지 않은 것이다
+            raise LLMOutputParseError(
+                f"구조화 응답 해석 실패 (finish_reason={choice.finish_reason})"
+            ) from error
 
 
 async def call_llm_with_fallback[T: BaseModel](
@@ -400,12 +431,13 @@ async def call_llm_with_fallback[T: BaseModel](
             if delay is None:
                 break
             logger.warning(
-                "로컬 모델 호출 실패 (%s, %d번째), %d초 뒤 재시도: %r",
+                "로컬 모델 호출 실패 (%s, %d번째), %d초 뒤 재시도 (%s)",
                 schema.__name__,
                 attempt,
                 delay,
-                error,
+                type(error).__name__,
             )
+            record_llm_retry(provider="openai_compatible", model=local.model_name)
             await asyncio.sleep(delay)
         except Exception as error:
             last_error = error
@@ -415,9 +447,14 @@ async def call_llm_with_fallback[T: BaseModel](
         raise last_error
 
     logger.warning(
-        "로컬 모델 %s 호출 실패 (%s), Gemini로 폴백: %r",
+        "로컬 모델 %s 호출 실패 (%s), Gemini로 폴백 (%s)",
         local.model_name,
         schema.__name__,
-        last_error,
+        type(last_error).__name__,
     )
-    return await call_llm_structured(prompt, cfg, schema), cfg
+    record_llm_fallback(provider="openai_compatible", model=local.model_name)
+    token = _fallback_call.set(True)
+    try:
+        return await call_llm_structured(prompt, cfg, schema), cfg
+    finally:
+        _fallback_call.reset(token)

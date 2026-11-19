@@ -1,5 +1,10 @@
+import json
 import logging
+import os
+from datetime import UTC, datetime
 from logging.config import dictConfig
+
+from opentelemetry import trace
 
 from src.core.config import get_settings
 
@@ -24,6 +29,52 @@ class OncePerMessage(logging.Filter):
         return True
 
 
+class TraceContext(logging.Filter):
+    """Attach the current OTel identifiers without adding request content."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        context = trace.get_current_span().get_span_context()
+        record.trace_id = f"{context.trace_id:032x}" if context.is_valid else ""
+        record.span_id = f"{context.span_id:016x}" if context.is_valid else ""
+        return True
+
+
+class JsonFormatter(logging.Formatter):
+    @staticmethod
+    def _safe_message(record: logging.LogRecord) -> str:
+        if record.exc_info and record.exc_info[0] is not None:
+            return f"{record.exc_info[0].__name__} raised"
+
+        def sanitize(value: object) -> object:
+            return type(value).__name__ if isinstance(value, BaseException) else value
+
+        args = record.args
+        if isinstance(args, tuple):
+            safe_args: object = tuple(sanitize(value) for value in args)
+        elif isinstance(args, dict):
+            safe_args = {key: sanitize(value) for key, value in args.items()}
+        else:
+            safe_args = sanitize(args)
+        try:
+            return str(record.msg) % safe_args if args else str(record.msg)
+        except (TypeError, ValueError):
+            return str(record.msg)
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": datetime.fromtimestamp(record.created, UTC).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": self._safe_message(record),
+            "service.name": os.getenv("OTEL_SERVICE_NAME", "cosmos-ai"),
+            "trace_id": getattr(record, "trace_id", ""),
+            "span_id": getattr(record, "span_id", ""),
+        }
+        if record.exc_info and record.exc_info[0] is not None:
+            payload["error_type"] = record.exc_info[0].__name__
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def setup_logging() -> None:
     settings = get_settings()
     level = settings.log_level.upper()
@@ -38,16 +89,19 @@ def setup_logging() -> None:
             "disable_existing_loggers": False,
             "formatters": {
                 "default": {
-                    "format": "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                    "()": JsonFormatter,
                 }
             },
-            "filters": {"once_per_message": {"()": OncePerMessage}},
+            "filters": {
+                "once_per_message": {"()": OncePerMessage},
+                "trace_context": {"()": TraceContext},
+            },
             "handlers": {
                 "console": {
                     "class": "logging.StreamHandler",
                     "stream": "ext://sys.stdout",
                     "formatter": "default",
+                    "filters": ["trace_context"],
                 }
             },
             "root": {"level": level, "handlers": ["console"]},
