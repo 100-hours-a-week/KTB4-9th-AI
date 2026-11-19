@@ -45,7 +45,7 @@ class FakeChatModel:
     def __init__(self, runnable: FakeRunnable):
         self.runnable = runnable
 
-    def with_structured_output(self, schema):
+    def with_structured_output(self, schema, include_raw=False):
         return self.runnable
 
 
@@ -100,6 +100,17 @@ async def test_구조화_응답_해석에_실패하면_파싱_에러를_낸다(m
 
     with pytest.raises(LLMOutputParseError):
         await call_llm_structured("prompt", CFG, Score)
+
+
+@pytest.mark.asyncio
+async def test_파싱_오류에_모델_출력이나_비밀값을_노출하지_않는다(monkeypatch):
+    secret = "raw-model-output-with-credential"
+    fix_chat_model(monkeypatch, FakeRunnable(error=OutputParserException(secret)))
+
+    with pytest.raises(LLMOutputParseError) as raised:
+        await call_llm_structured("sensitive-input", CFG, Score)
+
+    assert secret not in str(raised.value)
 
 
 @pytest.mark.asyncio
@@ -491,3 +502,15 @@ async def test_폴백하면_warning을_남긴다(monkeypatch, caplog):
         await call_llm_with_fallback("p", CALLED_CFG, Score, BATCH_LOCAL)
 
     assert "Gemini로 폴백" in caplog.text, "폴백 횟수를 셀 로그가 없다"
+
+
+@pytest.mark.asyncio
+async def test_폴백_warning에_provider_오류_본문을_노출하지_않는다(monkeypatch, caplog):
+    secret = "provider-response-with-secret"
+    fix_local(monkeypatch, RuntimeError(secret))
+    count_gemini(monkeypatch, Score(score=1))
+
+    with caplog.at_level(logging.WARNING, logger=module.__name__):
+        await call_llm_with_fallback("sensitive-input", CALLED_CFG, Score, BATCH_LOCAL)
+
+    assert secret not in caplog.text
